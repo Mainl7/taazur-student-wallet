@@ -1,7 +1,122 @@
 'use client';
+
 import { useEffect, useMemo, useState } from 'react';
 import AdminShell from '../components/AdminShell';
 import Barcode from '../components/Barcode';
-type Card = { id: string; publicToken: string; status: 'ACTIVE' | 'REVOKED' | 'EXPIRED'; issuedAt: string; revokedAt: string | null; student: { id: string; fullName: string; studentCode: string; school: { name: string } } };
+
+type Card = {
+  id: string;
+  publicToken: string;
+  status: 'ACTIVE' | 'REVOKED' | 'EXPIRED';
+  issuedAt: string;
+  revokedAt: string | null;
+  student: {
+    id: string;
+    fullName: string;
+    studentCode: string;
+    school: { name: string };
+  };
+};
+
 const api = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1';
-export default function Cards() { const [cards, setCards] = useState<Card[]>([]); const [message, setMessage] = useState(''); const headers = () => ({ authorization: `Bearer ${localStorage.getItem('taazur_token')}` }); const activeStudentIds = useMemo(() => new Set(cards.filter(card => card.status === 'ACTIVE').map(card => card.student.id)), [cards]); const load = async () => { const response = await fetch(`${api}/cards`, { headers: headers() }); if (response.status === 401) return location.assign('/login'); if (!response.ok) return setMessage('هذا الحساب لا يملك صلاحية إدارة البطاقات.'); const data: { cards?: Card[] } = await response.json(); setCards(Array.isArray(data.cards) ? data.cards : []); }; useEffect(() => { void load(); }, []); async function revoke(card: Card) { if (!confirm(`إلغاء بطاقة ${card.student.fullName}؟`)) return; const response = await fetch(`${api}/cards/${card.id}/revoke`, { method: 'POST', headers: headers() }); if (!response.ok) return setMessage('تعذر إلغاء البطاقة.'); setMessage('تم إلغاء البطاقة. يمكنك إصدار بديل.'); void load(); } async function replace(card: Card) { const response = await fetch(`${api}/students/${card.student.id}/cards`, { method: 'POST', headers: headers() }); if (!response.ok) return setMessage('تعذر إصدار بطاقة بديلة.'); setMessage('تم إصدار بطاقة بديلة برمز جديد وآمن.'); void load(); } return <AdminShell><header><div><h1>البطاقات</h1><a href="/students">← الطلاب</a></div><button type="button" onClick={() => print()}>طباعة البطاقات</button></header>{message && <p role="status">{message}</p>}<table><thead><tr><th>الطالب</th><th>المدرسة</th><th>باركود البطاقة</th><th>الحالة</th><th>تاريخ الإصدار</th><th>الإجراءات</th></tr></thead><tbody>{cards.map(card => <tr key={card.id}><td>{card.student.fullName}<br /><small>{card.student.studentCode}</small></td><td>{card.student.school.name}</td><td>{card.status === 'ACTIVE' ? <Barcode value={card.publicToken} /> : <span className="token">{card.publicToken}</span>}</td><td>{card.status}</td><td>{new Date(card.issuedAt).toLocaleDateString('ar-SA')}</td><td>{card.status === 'ACTIVE' ? <button onClick={() => void revoke(card)}>إلغاء</button> : !activeStudentIds.has(card.student.id) ? <button onClick={() => void replace(card)}>إصدار بديل</button> : 'تم الاستبدال'}</td></tr>)}</tbody></table></AdminShell>; }
+
+export default function Cards() {
+  const [cards, setCards] = useState<Card[]>([]);
+  const [message, setMessage] = useState('');
+  const headers = () => ({ authorization: `Bearer ${localStorage.getItem('taazur_token')}` });
+  const activeStudentIds = useMemo(
+    () => new Set(cards.filter(card => card.status === 'ACTIVE').map(card => card.student.id)),
+    [cards]
+  );
+
+  const load = async () => {
+    const response = await fetch(`${api}/cards`, { headers: headers() });
+    if (response.status === 401) return location.assign('/login');
+    if (!response.ok) return setMessage('هذا الحساب لا يملك صلاحية إدارة البطاقات.');
+
+    const data: { cards?: Card[] } = await response.json();
+    setCards(Array.isArray(data.cards) ? data.cards : []);
+  };
+
+  useEffect(() => { void load(); }, []);
+
+  async function revoke(card: Card) {
+    if (!confirm(`إلغاء بطاقة ${card.student.fullName}؟`)) return;
+
+    const response = await fetch(`${api}/cards/${card.id}/revoke`, {
+      method: 'POST',
+      headers: headers()
+    });
+
+    if (!response.ok) return setMessage('تعذر إلغاء البطاقة.');
+
+    setMessage('تم إلغاء البطاقة. يمكنك إصدار بديل.');
+    void load();
+  }
+
+  async function replace(card: Card) {
+    const response = await fetch(`${api}/students/${card.student.id}/cards`, {
+      method: 'POST',
+      headers: headers()
+    });
+
+    if (!response.ok) return setMessage('تعذر إصدار بطاقة بديلة.');
+
+    setMessage('تم إصدار بطاقة بديلة برمز جديد وآمن.');
+    void load();
+  }
+
+  return (
+    <AdminShell>
+      <header>
+        <div>
+          <h1>البطاقات</h1>
+          <a href="/students">← الطلاب</a>
+        </div>
+        <button type="button" onClick={() => print()}>طباعة البطاقات</button>
+      </header>
+
+      {message && <p role="status">{message}</p>}
+
+      <table>
+        <thead>
+          <tr>
+            <th>الطالب</th>
+            <th>المدرسة</th>
+            <th>باركود البطاقة</th>
+            <th>الحالة</th>
+            <th>تاريخ الإصدار</th>
+            <th>الإجراءات</th>
+          </tr>
+        </thead>
+        <tbody>
+          {cards.map(card => (
+            <tr key={card.id}>
+              <td>{card.student.fullName}<br /><small>{card.student.studentCode}</small></td>
+              <td>{card.student.school.name}</td>
+              <td>
+                {card.status === 'ACTIVE' ? (
+                  <Barcode
+                    value={card.publicToken}
+                    label={`${card.student.fullName} — ${card.student.studentCode}`}
+                    fileName={`taazur-${card.student.studentCode}`}
+                    downloadable
+                  />
+                ) : <span className="token">{card.publicToken}</span>}
+              </td>
+              <td>{card.status}</td>
+              <td>{new Date(card.issuedAt).toLocaleDateString('ar-SA')}</td>
+              <td>
+                {card.status === 'ACTIVE'
+                  ? <button onClick={() => void revoke(card)}>إلغاء</button>
+                  : !activeStudentIds.has(card.student.id)
+                    ? <button onClick={() => void replace(card)}>إصدار بديل</button>
+                    : 'تم الاستبدال'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </AdminShell>
+  );
+}
