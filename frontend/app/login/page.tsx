@@ -1,0 +1,6 @@
+'use client';
+import { FormEvent, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import BrandLogo from '../components/BrandLogo';
+const api = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1';
+export default function Login() { const [error, setError] = useState(''); const router = useRouter(); async function submit(e: FormEvent<HTMLFormElement>) { e.preventDefault(); const form = new FormData(e.currentTarget); const response = await fetch(`${api}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: form.get('email'), password: form.get('password') }) }); if (!response.ok) return setError('تعذر تسجيل الدخول. تحقق من البيانات.'); const data: { accessToken: string } = await response.json(); localStorage.setItem('taazur_token', data.accessToken); router.push('/schools'); } return <main className="login"><form onSubmit={submit}><BrandLogo compact /><p>تسجيل الدخول إلى الإدارة</p><label>البريد الإلكتروني<input name="email" type="email" defaultValue="admin@taazur.local" required /></label><label>كلمة المرور<input name="password" type="password" defaultValue="TaazurDemo!2026" required /></label><button>دخول</button>{error && <small role="alert">{error}</small>}</form></main>; }
