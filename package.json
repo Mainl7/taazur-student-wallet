@@ -1,0 +1,6 @@
+{
+  "name": "taazur-student-wallet",
+  "private": true,
+  "workspaces": ["frontend", "backend"],
+  "scripts": { "dev": "npm run dev --workspace backend", "build": "npm run build --workspaces" }
+}
