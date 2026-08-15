@@ -36,6 +36,7 @@ model User {
   email String @unique
   passwordHash String
   role Role
+  status EntityStatus @default(ACTIVE)
   schoolId String?
   school School? @relation(fields: [schoolId], references: [id])
   transactions WalletTransaction[] @relation("performedBy")
@@ -54,6 +55,7 @@ model School {
   students Student[]
   users User[]
   transactions WalletTransaction[]
+  auditLogs AuditLog[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -118,6 +120,8 @@ model AuditLog {
   id String @id @default(cuid())
   userId String?
   user User? @relation(fields: [userId], references: [id])
+  schoolId String?
+  school School? @relation(fields: [schoolId], references: [id])
   action String
   entity String
   entityId String
@@ -127,4 +131,14 @@ model AuditLog {
   userAgent String?
   timestamp DateTime @default(now())
   @@index([entity, entityId])
+  @@index([schoolId, timestamp])
+}
+
+model LoginAttempt {
+  id String @id @default(cuid())
+  email String @unique
+  failedCount Int @default(0)
+  lockedUntil DateTime?
+  lastAttemptAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

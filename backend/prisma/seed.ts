@@ -1,22 +1,59 @@
+import 'dotenv/config';
 import argon2 from 'argon2';
-import { PrismaClient, Role } from '@prisma/client';
+import { EntityStatus, PrismaClient, Role } from '@prisma/client';
+import { randomBytes } from 'node:crypto';
 
 const prisma = new PrismaClient();
-async function main() {
-  const passwordHash = await argon2.hash('TaazurDemo!2026');
-  await prisma.user.upsert({
-    where: { email: 'admin@taazur.local' },
-    update: { passwordHash, role: Role.ASSOCIATION_ADMIN },
-    create: { email: 'admin@taazur.local', passwordHash, role: Role.ASSOCIATION_ADMIN }
-  });
-  const schools = [
-    { schoolCode: 'TAZ-001', name: 'مدرسة الأمل الابتدائية', city: 'الرياض', district: 'الملز' },
-    { schoolCode: 'TAZ-002', name: 'مدرسة المستقبل المتوسطة', city: 'الرياض', district: 'النخيل' },
-    { schoolCode: 'TAZ-003', name: 'مدرسة النهضة الثانوية', city: 'الرياض', district: 'العليا' }
-  ];
-  for (const school of schools) await prisma.school.upsert({ where: { schoolCode: school.schoolCode }, update: school, create: school });
-  const firstSchool = await prisma.school.findUniqueOrThrow({ where: { schoolCode: 'TAZ-001' } });
-  const operatorHash = await argon2.hash('CanteenDemo!2026');
-  await prisma.user.upsert({ where: { email: 'operator@taazur.local' }, update: { passwordHash: operatorHash, role: Role.CANTEEN_OPERATOR, schoolId: firstSchool.id }, create: { email: 'operator@taazur.local', passwordHash: operatorHash, role: Role.CANTEEN_OPERATOR, schoolId: firstSchool.id } });
+const demoEmails = ['admin@taazur.local', 'operator@taazur.local'];
+
+async function removeOrDisableDemoAccounts() {
+  const randomHash = await argon2.hash(randomBytes(48).toString('base64url'));
+
+  for (const email of demoEmails) {
+    const user = await prisma.user.findUnique({
+      where: { email },
+      include: { _count: { select: { transactions: true, auditLogs: true } } }
+    });
+
+    if (!user) continue;
+
+    if (user._count.transactions === 0 && user._count.auditLogs === 0) {
+      await prisma.user.delete({ where: { id: user.id } });
+      continue;
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        status: EntityStatus.INACTIVE,
+        passwordHash: randomHash
+      }
+    });
+  }
 }
+
+async function createOfficialAdmin() {
+  const email = process.env.OFFICIAL_ADMIN_EMAIL?.trim().toLowerCase();
+  const password = process.env.OFFICIAL_ADMIN_PASSWORD;
+
+  if (!email || !password) {
+    console.warn('OFFICIAL_ADMIN_EMAIL/OFFICIAL_ADMIN_PASSWORD are not set; skipped official admin creation.');
+    return;
+  }
+
+  if (password.length < 16) throw new Error('OFFICIAL_ADMIN_PASSWORD must be at least 16 characters.');
+
+  const passwordHash = await argon2.hash(password);
+  await prisma.user.upsert({
+    where: { email },
+    update: { passwordHash, role: Role.ASSOCIATION_ADMIN, status: EntityStatus.ACTIVE, schoolId: null },
+    create: { email, passwordHash, role: Role.ASSOCIATION_ADMIN, status: EntityStatus.ACTIVE }
+  });
+}
+
+async function main() {
+  await removeOrDisableDemoAccounts();
+  await createOfficialAdmin();
+}
+
 main().finally(() => prisma.$disconnect());
