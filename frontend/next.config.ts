@@ -1,6 +1,8 @@
 import type { NextConfig } from 'next';
 
-const apiOrigin = process.env.NEXT_PUBLIC_API_URL ? new URL(process.env.NEXT_PUBLIC_API_URL).origin : 'http://localhost:4000';
+const configuredApiUrl = process.env.BACKEND_PROXY_URL ?? process.env.NEXT_PUBLIC_API_URL;
+const connectSources = ["'self'"];
+if (configuredApiUrl?.startsWith('http')) connectSources.push(new URL(configuredApiUrl).origin);
 
 const nextConfig: NextConfig = {
   async headers() {
@@ -24,7 +26,7 @@ const nextConfig: NextConfig = {
               "font-src 'self' data:",
               "style-src 'self' 'unsafe-inline'",
               "script-src 'self' 'unsafe-inline'",
-              `connect-src 'self' ${apiOrigin}`,
+              `connect-src ${connectSources.join(' ')}`,
               "upgrade-insecure-requests"
             ].join('; ')
           }
