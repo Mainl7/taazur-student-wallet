@@ -1,12 +1,20 @@
 'use client';
 
+import { BrowserMultiFormatReader, type IScannerControls } from '@zxing/browser';
+import { BarcodeFormat, DecodeHintType } from '@zxing/library';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import BrandLogo from '../components/BrandLogo';
 import { apiFetch } from '../lib/api';
 
-type DetectorResult = { rawValue: string };
-type BarcodeDetectorCtor = new (options?: { formats?: string[] }) => { detect(source: HTMLVideoElement): Promise<DetectorResult[]> };
 type MeResponse = { user?: { role: string }; error?: string };
+
+const scannerHints = new Map<DecodeHintType, unknown>([
+  [
+    DecodeHintType.POSSIBLE_FORMATS,
+    [BarcodeFormat.QR_CODE, BarcodeFormat.CODE_128, BarcodeFormat.CODE_39]
+  ],
+  [DecodeHintType.TRY_HARDER, true]
+]);
 
 export default function Canteen() {
   const [notice, setNotice] = useState('');
@@ -14,8 +22,7 @@ export default function Canteen() {
   const [scanning, setScanning] = useState(false);
   const cardInput = useRef<HTMLInputElement>(null);
   const video = useRef<HTMLVideoElement>(null);
-  const stream = useRef<MediaStream | null>(null);
-  const loop = useRef<number | null>(null);
+  const scannerControls = useRef<IScannerControls | null>(null);
 
   useEffect(() => {
     const checkAccess = async () => {
@@ -35,40 +42,62 @@ export default function Canteen() {
   }, []);
 
   function stopCamera() {
-    if (loop.current) cancelAnimationFrame(loop.current);
-    loop.current = null;
-    stream.current?.getTracks().forEach(track => track.stop());
-    stream.current = null;
+    scannerControls.current?.stop();
+    scannerControls.current = null;
+    if (video.current) video.current.srcObject = null;
     setScanning(false);
   }
 
   async function startCamera() {
-    const Detector = (window as unknown as { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector;
-    if (!Detector) return setNotice('المتصفح لا يدعم قراءة الباركود بالكاميرا. جرّب Chrome على Android أو استخدم قارئ USB.');
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setNotice('هذا المتصفح لا يدعم فتح الكاميرا من داخل الموقع. استخدم Safari/Chrome محدث أو قارئ باركود USB.');
+      return;
+    }
+
+    if (!video.current) {
+      setNotice('تعذر تجهيز نافذة الكاميرا. حدّث الصفحة وحاول مرة أخرى.');
+      return;
+    }
+
+    stopCamera();
+    setScanning(true);
+    setNotice('جاري فتح الكاميرا… اسمح للموقع باستخدام الكاميرا ثم وجّهها إلى QR الموجود في بطاقة الطالب.');
+
+    const reader = new BrowserMultiFormatReader(scannerHints, {
+      delayBetweenScanAttempts: 180,
+      delayBetweenScanSuccess: 500,
+      tryPlayVideoTimeout: 8000
+    });
 
     try {
-      stream.current = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-      if (!video.current) return;
-      video.current.srcObject = stream.current;
-      await video.current.play();
-      setScanning(true);
-      const detector = new Detector({ formats: ['code_128', 'code_39', 'ean_13', 'qr_code'] });
-      const scan = async () => {
-        if (!video.current || !stream.current) return;
-        const codes = await detector.detect(video.current).catch(() => []);
-        const value = codes[0]?.rawValue;
-        if (value) {
-          if (cardInput.current) cardInput.current.value = value;
-          setNotice('تمت قراءة الباركود. أدخل المبلغ ثم اضغط تأكيد الخصم.');
+      scannerControls.current = await reader.decodeFromConstraints(
+        {
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        },
+        video.current,
+        result => {
+          const value = result?.getText();
+          if (!value) return;
+          if (cardInput.current) cardInput.current.value = value.trim();
+          setNotice('تمت قراءة رمز البطاقة. أدخل المبلغ ثم اضغط تأكيد الخصم.');
           stopCamera();
           cardInput.current?.focus();
-          return;
         }
-        loop.current = requestAnimationFrame(scan);
-      };
-      loop.current = requestAnimationFrame(scan);
-    } catch {
-      setNotice('تعذر فتح الكاميرا. غالبًا تحتاج السماح للمتصفح باستخدام الكاميرا وفتح الموقع عبر HTTPS.');
+      );
+    } catch (error) {
+      const name = error instanceof DOMException ? error.name : '';
+      if (name === 'NotAllowedError') {
+        setNotice('تم رفض صلاحية الكاميرا. من إعدادات المتصفح اسمح للموقع باستخدام الكاميرا ثم جرّب مرة أخرى.');
+      } else if (name === 'NotFoundError') {
+        setNotice('لم يتم العثور على كاميرا في هذا الجهاز.');
+      } else {
+        setNotice('تعذر فتح الكاميرا. تأكد أنك تستخدم رابط HTTPS وأن صلاحية الكاميرا مفعلة.');
+      }
       stopCamera();
     }
   }
@@ -113,17 +142,17 @@ export default function Canteen() {
     <main className="pos">
       <BrandLogo compact />
       <h1>مقصف المدرسة</h1>
-      <p>استخدم قارئ الباركود USB مباشرة، أو افتح كاميرا الجوال/التابلت لمسح البطاقة.</p>
+      <p>استخدم قارئ الباركود USB مباشرة، أو افتح كاميرا الجوال/التابلت لمسح QR الموجود في بطاقة الطالب.</p>
 
       {authorized && (
         <>
           <form onSubmit={submit}>
-            <label>رمز البطاقة<input ref={cardInput} name="cardToken" required minLength={20} placeholder="امسح الباركود هنا" autoComplete="off" /></label>
+            <label>رمز البطاقة<input ref={cardInput} name="cardToken" required minLength={20} placeholder="امسح QR أو الباركود هنا" autoComplete="off" /></label>
             <div className="scan-actions">
-              <button type="button" className="secondary" onClick={() => void startCamera()}>مسح بالكاميرا</button>
+              <button type="button" className="secondary" onClick={() => void startCamera()} disabled={scanning}>مسح بالكاميرا</button>
               {scanning && <button type="button" className="secondary" onClick={stopCamera}>إيقاف الكاميرا</button>}
             </div>
-            {scanning && <video ref={video} className="scanner-preview" muted playsInline />}
+            <video ref={video} className="scanner-preview" muted playsInline autoPlay hidden={!scanning} />
             <label>قيمة العملية (ر.س)<input name="amount" required type="number" min="0.01" step="0.01" /></label>
             <button>تأكيد الخصم</button>
           </form>
