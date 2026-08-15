@@ -1,8 +1,27 @@
-import { ReactNode } from 'react';
+'use client';
+
+import { ReactNode, useEffect, useState } from 'react';
 import BrandLogo from './BrandLogo';
 import LogoutButton from './LogoutButton';
+import { apiFetch } from '../lib/api';
 
 export default function AdminShell({ children }: { children: ReactNode }) {
+  const [allowed, setAllowed] = useState(false);
+
+  useEffect(() => {
+    const checkAccess = async () => {
+      const response = await apiFetch('/auth/me');
+      if (response.status === 401) return location.assign('/login');
+      const data: { user?: { role: string } } = await response.json();
+      if (data.user?.role === 'CANTEEN_OPERATOR') return location.assign('/canteen');
+      setAllowed(true);
+    };
+
+    void checkAccess();
+  }, []);
+
+  if (!allowed) return <main className="login"><p role="status">جاري التحقق من صلاحية الدخول...</p></main>;
+
   return (
     <main>
       <aside>

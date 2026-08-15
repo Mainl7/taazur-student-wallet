@@ -6,16 +6,33 @@ import { apiFetch } from '../lib/api';
 
 type DetectorResult = { rawValue: string };
 type BarcodeDetectorCtor = new (options?: { formats?: string[] }) => { detect(source: HTMLVideoElement): Promise<DetectorResult[]> };
+type MeResponse = { user?: { role: string }; error?: string };
 
 export default function Canteen() {
   const [notice, setNotice] = useState('');
+  const [authorized, setAuthorized] = useState(false);
   const [scanning, setScanning] = useState(false);
   const cardInput = useRef<HTMLInputElement>(null);
   const video = useRef<HTMLVideoElement>(null);
   const stream = useRef<MediaStream | null>(null);
   const loop = useRef<number | null>(null);
 
-  useEffect(() => { cardInput.current?.focus(); return stopCamera; }, []);
+  useEffect(() => {
+    const checkAccess = async () => {
+      const response = await apiFetch('/auth/me');
+      if (response.status === 401) return location.assign('/login');
+      const data: MeResponse = await response.json();
+      if (data.user?.role !== 'CANTEEN_OPERATOR') {
+        setNotice('هذه الصفحة مخصصة لموظف المقصف فقط. استخدم لوحة الإدارة من حساب المدير.');
+        return;
+      }
+      setAuthorized(true);
+      cardInput.current?.focus();
+    };
+
+    void checkAccess();
+    return stopCamera;
+  }, []);
 
   function stopCamera() {
     if (loop.current) cancelAnimationFrame(loop.current);
@@ -97,21 +114,27 @@ export default function Canteen() {
       <BrandLogo compact />
       <h1>مقصف المدرسة</h1>
       <p>استخدم قارئ الباركود USB مباشرة، أو افتح كاميرا الجوال/التابلت لمسح البطاقة.</p>
-      <form onSubmit={submit}>
-        <label>رمز البطاقة<input ref={cardInput} name="cardToken" required minLength={20} placeholder="امسح الباركود هنا" autoComplete="off" /></label>
-        <div className="scan-actions">
-          <button type="button" className="secondary" onClick={() => void startCamera()}>مسح بالكاميرا</button>
-          {scanning && <button type="button" className="secondary" onClick={stopCamera}>إيقاف الكاميرا</button>}
-        </div>
-        {scanning && <video ref={video} className="scanner-preview" muted playsInline />}
-        <label>قيمة العملية (ر.س)<input name="amount" required type="number" min="0.01" step="0.01" /></label>
-        <button>تأكيد الخصم</button>
-      </form>
-      <form onSubmit={refund}>
-        <h2>استرجاع عملية</h2>
-        <label>رقم العملية<input name="reference" required placeholder="الصق رقم العملية هنا" /></label>
-        <button>استرجاع المبلغ</button>
-      </form>
+
+      {authorized && (
+        <>
+          <form onSubmit={submit}>
+            <label>رمز البطاقة<input ref={cardInput} name="cardToken" required minLength={20} placeholder="امسح الباركود هنا" autoComplete="off" /></label>
+            <div className="scan-actions">
+              <button type="button" className="secondary" onClick={() => void startCamera()}>مسح بالكاميرا</button>
+              {scanning && <button type="button" className="secondary" onClick={stopCamera}>إيقاف الكاميرا</button>}
+            </div>
+            {scanning && <video ref={video} className="scanner-preview" muted playsInline />}
+            <label>قيمة العملية (ر.س)<input name="amount" required type="number" min="0.01" step="0.01" /></label>
+            <button>تأكيد الخصم</button>
+          </form>
+          <form onSubmit={refund}>
+            <h2>استرجاع عملية</h2>
+            <label>رقم العملية<input name="reference" required placeholder="الصق رقم العملية هنا" /></label>
+            <button>استرجاع المبلغ</button>
+          </form>
+        </>
+      )}
+
       {notice && <p role="status">{notice}</p>}
     </main>
   );

@@ -5,6 +5,11 @@ import { useRouter } from 'next/navigation';
 import BrandLogo from '../components/BrandLogo';
 import { apiFetch } from '../lib/api';
 
+type LoginResponse = {
+  user?: { email: string; role: string; schoolId?: string | null };
+  error?: string;
+};
+
 const errorMessages: Record<string, string> = {
   INVALID_CREDENTIALS: 'تعذر تسجيل الدخول. تحقق من البيانات.',
   LOGIN_LOCKED: 'تم قفل محاولات الدخول مؤقتًا بسبب تكرار كلمة مرور خاطئة. حاول بعد 15 دقيقة.',
@@ -25,19 +30,19 @@ export default function Login() {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: form.get('email'), password: form.get('password') })
     });
-    const data: { error?: string } = await response.json();
+    const data: LoginResponse = await response.json();
 
     if (!response.ok) return setError(errorMessages[data.error ?? ''] ?? 'تعذر تسجيل الدخول.');
 
     localStorage.removeItem('taazur_token');
-    router.push('/schools');
+    router.push(data.user?.role === 'CANTEEN_OPERATOR' ? '/canteen' : '/');
   }
 
   return (
     <main className="login">
       <form onSubmit={submit}>
         <BrandLogo compact />
-        <p>تسجيل الدخول إلى الإدارة</p>
+        <p>تسجيل الدخول إلى تآزر</p>
         <label>البريد الإلكتروني<input name="email" type="email" autoComplete="username" required /></label>
         <label>كلمة المرور<input name="password" type="password" autoComplete="current-password" required /></label>
         <button>دخول</button>

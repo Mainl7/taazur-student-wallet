@@ -142,6 +142,17 @@ app.post('/api/v1/auth/logout', (_req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/v1/auth/me', auth, async (req, res, next) => {
+  try {
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { id: req.claims!.sub },
+      select: { email: true, role: true, schoolId: true, status: true }
+    });
+    if (user.status !== EntityStatus.ACTIVE) return res.status(401).json({ error: 'INVALID_TOKEN' });
+    res.json({ user });
+  } catch (error) { next(error); }
+});
+
 const schoolSchema = z.object({ schoolCode: z.string().trim().min(3).max(32), name: z.string().trim().min(3).max(150), city: z.string().trim().min(2).max(80), district: z.string().trim().max(80).optional(), address: z.string().trim().max(300).optional() });
 app.get('/api/v1/schools', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
   try {
@@ -306,6 +317,27 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
 });
 
 const debitSchema = z.object({ cardToken: z.string().min(20).max(128), amount: z.coerce.number().positive().max(1000) });
+
+async function getTodayNetDebit(tx: Prisma.TransactionClient, studentId: string) {
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const todayDebits = await tx.walletTransaction.findMany({
+    where: { studentId, type: TransactionType.DEBIT, createdAt: { gte: startOfDay } },
+    select: { id: true, amount: true }
+  });
+  const debitTotal = todayDebits.reduce((sum, transaction) => sum + Number(transaction.amount), 0);
+  const refundReferences = todayDebits.map(transaction => `REFUND-${transaction.id}`);
+
+  if (!refundReferences.length) return debitTotal;
+
+  const refunds = await tx.walletTransaction.aggregate({
+    where: { studentId, type: TransactionType.REFUND, reference: { in: refundReferences } },
+    _sum: { amount: true }
+  });
+
+  return Math.max(0, debitTotal - Number(refunds._sum.amount ?? 0));
+}
+
 app.post('/api/v1/transactions/debit', auth, roles(Role.CANTEEN_OPERATOR), async (req, res, next) => {
   try {
     const idempotencyKey = req.header('idempotency-key');
@@ -323,9 +355,8 @@ app.post('/api/v1/transactions/debit', auth, roles(Role.CANTEEN_OPERATOR), async
       const card = await tx.card.findUniqueOrThrow({ where: { publicToken: input.cardToken }, include: { student: true } });
       if (card.student.status !== 'ACTIVE') throw new Error('STUDENT_INACTIVE');
       if (req.claims!.schoolId && req.claims!.schoolId !== card.student.schoolId) throw new Error('SCHOOL_SCOPE_DENIED');
-      const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
-      const today = await tx.walletTransaction.aggregate({ where: { studentId: card.studentId, type: TransactionType.DEBIT, createdAt: { gte: startOfDay } }, _sum: { amount: true } });
-      if (Number(today._sum.amount ?? 0) + input.amount > Number(card.student.dailyLimit)) throw new Error('DAILY_LIMIT_EXCEEDED');
+      const todayNetDebit = await getTodayNetDebit(tx, card.studentId);
+      if (todayNetDebit + input.amount > Number(card.student.dailyLimit)) throw new Error('DAILY_LIMIT_EXCEEDED');
       const balanceAfter = balanceBefore - input.amount;
       await tx.wallet.update({ where: { id: wallet.id }, data: { balance: balanceAfter } });
       const created = await tx.walletTransaction.create({ data: { reference: randomUUID(), idempotencyKey, walletId: wallet.id, studentId: card.studentId, schoolId: card.student.schoolId, amount: input.amount, type: TransactionType.DEBIT, balanceBefore, balanceAfter, performedById: req.claims!.sub } });
