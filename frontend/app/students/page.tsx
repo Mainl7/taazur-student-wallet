@@ -125,7 +125,7 @@ export default function Students() {
             <th>المدرسة</th>
             <th>الحد اليومي</th>
             <th>الرصيد</th>
-            <th>باركود البطاقة</th>
+            <th>بطاقة QR</th>
             <th>الإجراء</th>
           </tr>
         </thead>

@@ -75,7 +75,7 @@ export default function Cards() {
           <tr>
             <th>الطالب</th>
             <th>المدرسة</th>
-            <th>باركود البطاقة</th>
+            <th>بطاقة QR</th>
             <th>الحالة</th>
             <th>تاريخ الإصدار</th>
             <th>الإجراءات</th>
