@@ -19,25 +19,12 @@ const cardHeight = 540;
 const pdfWidthPt = 85.6 * 2.8346456693;
 const pdfHeightPt = 54 * 2.8346456693;
 
-function escapeXml(value: string) {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&apos;');
-}
-
 function safeFileName(value: string) {
   return value
     .trim()
     .replace(/[\\/:*?"<>|]+/g, '-')
     .replace(/\s+/g, '-')
     .slice(0, 90) || 'student-card';
-}
-
-function svgToDataUri(svg: string) {
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
 function downloadBlob(blob: Blob, fileName: string) {
@@ -51,63 +38,115 @@ function downloadBlob(blob: Blob, fileName: string) {
   URL.revokeObjectURL(url);
 }
 
-async function buildCardSvg(input: BarcodeProps) {
-  const qrSvg = await QRCode.toString(input.value, { type: 'svg', width: 250, margin: 1, errorCorrectionLevel: 'M' });
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="85.6mm" height="54mm" viewBox="0 0 ${cardWidth} ${cardHeight}">
-  <defs>
-    <linearGradient id="cardBg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#063927"/>
-      <stop offset="0.52" stop-color="#0b5a42"/>
-      <stop offset="1" stop-color="#094630"/>
-    </linearGradient>
-    <linearGradient id="softShine" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
-      <stop offset="0.48" stop-color="#ffffff" stop-opacity="0.03"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
-    </linearGradient>
-  </defs>
-  <rect width="${cardWidth}" height="${cardHeight}" rx="42" fill="#0b5a42"/>
-  <rect x="0" y="0" width="${cardWidth}" height="${cardHeight}" rx="42" fill="url(#cardBg)"/>
-  <path d="M-80 90 C170 5 360 42 575 -25 C710 -68 805 -44 930 25 L930 -60 L-80 -60 Z" fill="url(#softShine)"/>
-  <circle cx="750" cy="432" r="170" fill="#ffffff" opacity="0.06"/>
-  <circle cx="92" cy="88" r="92" fill="#c8a45b" opacity="0.14"/>
-  <path d="M92 460 H520" stroke="#c8a45b" stroke-width="5" stroke-linecap="round" opacity="0.8"/>
-  <path d="M92 486 H390" stroke="#ffffff" stroke-width="3" stroke-linecap="round" opacity="0.24"/>
-  <g direction="rtl" unicode-bidi="plaintext" font-family="Tahoma, Arial, sans-serif">
-    <text x="548" y="118" text-anchor="middle" font-size="30" font-weight="700" fill="#d9bd79">بطاقة طالب</text>
-    <text x="548" y="222" text-anchor="middle" font-size="48" font-weight="800" fill="#ffffff">${escapeXml(input.studentName)}</text>
-    <text x="548" y="304" text-anchor="middle" font-size="27" font-weight="700" fill="#e8f3ee">رمز الطالب: ${escapeXml(input.studentCode)}</text>
-    <text x="548" y="374" text-anchor="middle" font-size="25" font-weight="700" fill="#e8f3ee">${escapeXml(input.schoolName)}</text>
-  </g>
-  <rect x="54" y="122" width="284" height="284" rx="30" fill="#ffffff" stroke="#d9bd79" stroke-width="5"/>
-  <image x="71" y="139" width="250" height="250" href="${svgToDataUri(qrSvg)}"/>
-  <text x="196" y="450" text-anchor="middle" direction="rtl" unicode-bidi="plaintext" font-family="Tahoma, Arial, sans-serif" font-size="20" font-weight="700" fill="#ffffff">امسح QR للدفع</text>
-</svg>`;
-}
-
-async function svgToCanvas(svg: string) {
+function loadImage(src: string) {
   const image = new Image();
   image.decoding = 'async';
-  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
-  try {
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error('IMAGE_RENDER_FAILED'));
-      image.src = url;
-    });
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('IMAGE_RENDER_FAILED'));
+    image.src = src;
+  });
+}
 
-    const canvas = document.createElement('canvas');
-    canvas.width = cardWidth * 4;
-    canvas.height = cardHeight * 4;
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error('CANVAS_NOT_SUPPORTED');
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return canvas;
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+function roundedRect(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
+  context.beginPath();
+  context.moveTo(x + radius, y);
+  context.lineTo(x + width - radius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + radius);
+  context.lineTo(x + width, y + height - radius);
+  context.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  context.lineTo(x + radius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - radius);
+  context.lineTo(x, y + radius);
+  context.quadraticCurveTo(x, y, x + radius, y);
+  context.closePath();
+}
+
+async function buildCardCanvas(input: BarcodeProps) {
+  const scale = 4;
+  const canvas = document.createElement('canvas');
+  canvas.width = cardWidth * scale;
+  canvas.height = cardHeight * scale;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('CANVAS_NOT_SUPPORTED');
+  context.scale(scale, scale);
+
+  const background = context.createLinearGradient(0, 0, cardWidth, cardHeight);
+  background.addColorStop(0, '#063927');
+  background.addColorStop(0.52, '#0b5a42');
+  background.addColorStop(1, '#094630');
+  roundedRect(context, 0, 0, cardWidth, cardHeight, 42);
+  context.fillStyle = background;
+  context.fill();
+
+  const shine = context.createLinearGradient(0, 0, cardWidth, cardHeight);
+  shine.addColorStop(0, 'rgba(255,255,255,.20)');
+  shine.addColorStop(0.5, 'rgba(255,255,255,.04)');
+  shine.addColorStop(1, 'rgba(255,255,255,0)');
+  context.fillStyle = shine;
+  context.beginPath();
+  context.moveTo(-80, 90);
+  context.bezierCurveTo(170, 5, 360, 42, 575, -25);
+  context.bezierCurveTo(710, -68, 805, -44, 930, 25);
+  context.lineTo(930, -60);
+  context.lineTo(-80, -60);
+  context.closePath();
+  context.fill();
+
+  context.fillStyle = 'rgba(255,255,255,.06)';
+  context.beginPath();
+  context.arc(750, 432, 170, 0, Math.PI * 2);
+  context.fill();
+  context.fillStyle = 'rgba(200,164,91,.14)';
+  context.beginPath();
+  context.arc(92, 88, 92, 0, Math.PI * 2);
+  context.fill();
+
+  context.strokeStyle = '#c8a45b';
+  context.globalAlpha = 0.8;
+  context.lineWidth = 5;
+  context.lineCap = 'round';
+  context.beginPath();
+  context.moveTo(92, 460);
+  context.lineTo(520, 460);
+  context.stroke();
+  context.strokeStyle = '#ffffff';
+  context.globalAlpha = 0.24;
+  context.lineWidth = 3;
+  context.beginPath();
+  context.moveTo(92, 486);
+  context.lineTo(390, 486);
+  context.stroke();
+  context.globalAlpha = 1;
+
+  context.direction = 'rtl';
+  context.textAlign = 'center';
+  context.fillStyle = '#d9bd79';
+  context.font = '700 30px Tahoma, Arial, sans-serif';
+  context.fillText('بطاقة طالب', 548, 118);
+  context.fillStyle = '#ffffff';
+  context.font = '800 48px Tahoma, Arial, sans-serif';
+  context.fillText(input.studentName, 548, 222, 420);
+  context.fillStyle = '#e8f3ee';
+  context.font = '700 27px Tahoma, Arial, sans-serif';
+  context.fillText(`رمز الطالب: ${input.studentCode}`, 548, 304, 420);
+  context.font = '700 25px Tahoma, Arial, sans-serif';
+  context.fillText(input.schoolName, 548, 374, 420);
+
+  roundedRect(context, 54, 122, 284, 284, 30);
+  context.fillStyle = '#ffffff';
+  context.fill();
+  context.strokeStyle = '#d9bd79';
+  context.lineWidth = 5;
+  context.stroke();
+  const qrUrl = await QRCode.toDataURL(input.value, { width: 250, margin: 1, errorCorrectionLevel: 'M' });
+  const qrImage = await loadImage(qrUrl);
+  context.drawImage(qrImage, 71, 139, 250, 250);
+
+  context.fillStyle = '#ffffff';
+  context.font = '700 20px Tahoma, Arial, sans-serif';
+  context.fillText('امسح QR للدفع', 196, 450);
+  return canvas;
 }
 
 function canvasToBlob(canvas: HTMLCanvasElement, type: 'image/png' | 'image/jpeg', quality?: number) {
@@ -164,8 +203,7 @@ export default function Barcode(props: BarcodeProps) {
 
   const download = async (format: DownloadFormat) => {
     const baseName = safeFileName(fileName ?? `${studentCode}-${studentName}`);
-    const svg = await buildCardSvg(props);
-    const canvas = await svgToCanvas(svg);
+    const canvas = await buildCardCanvas(props);
 
     if (format === 'png') {
       downloadBlob(await canvasToBlob(canvas, 'image/png'), `${baseName}.png`);
