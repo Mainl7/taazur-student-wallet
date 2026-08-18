@@ -397,20 +397,136 @@ app.get('/api/v1/transactions', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_A
 });
 app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
   try {
-    const schoolId = req.claims!.schoolId;
+    const schoolId = scopedSchoolFromQuery(req);
     const studentWhere = schoolId ? { schoolId } : {};
     const walletWhere = schoolId ? { student: { schoolId } } : {};
     const transactionWhere = schoolId ? { schoolId } : {};
-    const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
-    const [schools, students, walletBalance, todayTransactions, todaySpent, revokedCards] = await Promise.all([
+    const today = startOfToday();
+    const week = daysAgo(6);
+    const month = startOfThisMonth();
+    const period = typeof req.query.period === 'string' && ['today', 'week', 'month'].includes(req.query.period) ? req.query.period : 'today';
+    const periodStart = period === 'month' ? month : period === 'week' ? week : today;
+    const last7Start = daysAgo(6);
+    const last7Days = Array.from({ length: 7 }, (_, index) => {
+      const date = daysAgo(6 - index);
+      return date.toISOString().slice(0, 10);
+    });
+
+    const [
+      schools,
+      activeStudents,
+      walletBalance,
+      todayTransactions,
+      periodTransactions,
+      todaySpent,
+      weekSpent,
+      monthSpent,
+      periodSpent,
+      revokedCards,
+      lowWallets,
+      lowWalletCount,
+      activeStudentRows,
+      todayDebitRows,
+      todayRefundRows,
+      revokedAttempts,
+      failedLogins,
+      refundGroups,
+      last7Transactions,
+      topStudentGroups,
+      topSchoolGroups,
+      canteenUsers
+    ] = await Promise.all([
       prisma.school.count({ where: schoolId ? { id: schoolId } : {} }),
-      prisma.student.count({ where: studentWhere }),
+      prisma.student.count({ where: { ...studentWhere, status: EntityStatus.ACTIVE } }),
       prisma.wallet.aggregate({ where: walletWhere, _sum: { balance: true } }),
-      prisma.walletTransaction.count({ where: { ...transactionWhere, createdAt: { gte: startOfDay } } }),
-      prisma.walletTransaction.aggregate({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: startOfDay } }, _sum: { amount: true } }),
-      prisma.card.count({ where: { status: 'REVOKED', ...(schoolId ? { student: { schoolId } } : {}) } })
+      prisma.walletTransaction.count({ where: { ...transactionWhere, createdAt: { gte: today } } }),
+      prisma.walletTransaction.count({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: periodStart } } }),
+      prisma.walletTransaction.aggregate({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: today } }, _sum: { amount: true } }),
+      prisma.walletTransaction.aggregate({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: week } }, _sum: { amount: true } }),
+      prisma.walletTransaction.aggregate({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: month } }, _sum: { amount: true } }),
+      prisma.walletTransaction.aggregate({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: periodStart } }, _sum: { amount: true } }),
+      prisma.card.count({ where: { status: 'REVOKED', ...(schoolId ? { student: { schoolId } } : {}) } }),
+      prisma.wallet.findMany({ where: { balance: { lt: 10 }, student: { ...studentWhere, status: EntityStatus.ACTIVE } }, include: { student: { select: { fullName: true, studentCode: true, school: { select: { name: true } } } } }, take: 5, orderBy: { balance: 'asc' } }),
+      prisma.wallet.count({ where: { balance: { lt: 10 }, student: { ...studentWhere, status: EntityStatus.ACTIVE } } }),
+      prisma.student.findMany({ where: { ...studentWhere, status: EntityStatus.ACTIVE }, select: { id: true, fullName: true, studentCode: true, dailyLimit: true, school: { select: { name: true } } } }),
+      prisma.walletTransaction.findMany({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: today } }, select: { studentId: true, amount: true } }),
+      prisma.walletTransaction.findMany({ where: { ...transactionWhere, type: TransactionType.REFUND, createdAt: { gte: today } }, select: { studentId: true, amount: true, reference: true } }),
+      prisma.auditLog.count({ where: { ...(schoolId ? { schoolId } : {}), action: 'CARD_REVOKED_USED', timestamp: { gte: daysAgo(7) } } }),
+      prisma.loginAttempt.count({ where: { failedCount: { gte: 3 } } }),
+      prisma.walletTransaction.groupBy({ by: ['performedById', 'schoolId'], where: { ...transactionWhere, type: TransactionType.REFUND, createdAt: { gte: daysAgo(7) } }, _count: { id: true } }),
+      prisma.walletTransaction.findMany({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: last7Start } }, select: { amount: true, createdAt: true } }),
+      prisma.walletTransaction.groupBy({ by: ['studentId'], where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: periodStart } }, _sum: { amount: true }, _count: { id: true }, orderBy: { _count: { id: 'desc' } }, take: 5 }),
+      prisma.walletTransaction.groupBy({ by: ['schoolId'], where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: periodStart } }, _sum: { amount: true }, _count: { id: true }, orderBy: { _count: { id: 'desc' } }, take: 5 }),
+      prisma.user.findMany({ where: { role: Role.CANTEEN_OPERATOR, status: EntityStatus.ACTIVE, ...(schoolId ? { schoolId } : {}) }, select: { id: true } })
     ]);
-    res.json({ schools, students, walletBalance: walletBalance._sum.balance ?? 0, todayTransactions, todaySpent: todaySpent._sum.amount ?? 0, revokedCards });
+
+    const dailyLimitMap = new Map(activeStudentRows.map(student => [student.id, { student, debit: 0, refund: 0 }]));
+    for (const debit of todayDebitRows) {
+      const item = dailyLimitMap.get(debit.studentId);
+      if (item) item.debit += money(debit.amount);
+    }
+    for (const refund of todayRefundRows.filter(item => item.reference.startsWith('REFUND-'))) {
+      const item = dailyLimitMap.get(refund.studentId);
+      if (item) item.refund += money(refund.amount);
+    }
+    const dailyLimitReached = [...dailyLimitMap.values()].filter(item => Math.max(0, item.debit - item.refund) >= money(item.student.dailyLimit));
+    const repeatedRefunds = refundGroups.filter(group => group._count.id >= 3).length;
+    const alertsCount = lowWalletCount + dailyLimitReached.length + revokedAttempts + failedLogins + repeatedRefunds;
+
+    const spendingByDay = last7Days.map(date => ({ date, amount: 0, count: 0 }));
+    const dayMap = new Map(spendingByDay.map(item => [item.date, item]));
+    for (const transaction of last7Transactions) {
+      const date = transaction.createdAt.toISOString().slice(0, 10);
+      const item = dayMap.get(date);
+      if (!item) continue;
+      item.amount += money(transaction.amount);
+      item.count += 1;
+    }
+    const maxDailySpend = Math.max(1, ...spendingByDay.map(item => item.amount));
+
+    const topStudentIds = topStudentGroups.map(group => group.studentId);
+    const topSchoolIds = topSchoolGroups.map(group => group.schoolId);
+    const [topStudentsData, topSchoolsData, canteenSummaries] = await Promise.all([
+      prisma.student.findMany({ where: { id: { in: topStudentIds } }, select: { id: true, fullName: true, studentCode: true, school: { select: { name: true } } } }),
+      prisma.school.findMany({ where: { id: { in: topSchoolIds } }, select: { id: true, name: true, schoolCode: true } }),
+      Promise.all(canteenUsers.map(user => canteenDue(user.id, req.claims!)))
+    ]);
+    const topStudentMap = new Map(topStudentsData.map(student => [student.id, student]));
+    const topSchoolMap = new Map(topSchoolsData.map(school => [school.id, school]));
+    const canteenUnsettledTotal = canteenSummaries.reduce((sum, item) => sum + money(item.net), 0);
+    const canteensWithDue = canteenSummaries.filter(item => money(item.net) > 0).length;
+
+    res.json({
+      schools,
+      students: activeStudents,
+      walletBalance: asMoney(walletBalance._sum.balance),
+      todayTransactions,
+      periodTransactions,
+      todaySpent: asMoney(todaySpent._sum.amount),
+      weekSpent: asMoney(weekSpent._sum.amount),
+      monthSpent: asMoney(monthSpent._sum.amount),
+      periodSpent: asMoney(periodSpent._sum.amount),
+      revokedCards,
+      alertsCount,
+      filter: { period, schoolId: schoolId ?? null },
+      spendingByDay: spendingByDay.map(item => ({ ...item, amount: asMoney(item.amount), percentage: Math.round((item.amount / maxDailySpend) * 100) })),
+      topStudents: topStudentGroups.map(group => {
+        const student = topStudentMap.get(group.studentId);
+        return { studentId: group.studentId, fullName: student?.fullName ?? group.studentId, studentCode: student?.studentCode ?? '—', schoolName: student?.school.name ?? '—', count: group._count.id, amount: asMoney(group._sum.amount) };
+      }),
+      topSchools: topSchoolGroups.map(group => {
+        const school = topSchoolMap.get(group.schoolId);
+        return { schoolId: group.schoolId, schoolName: school?.name ?? group.schoolId, schoolCode: school?.schoolCode ?? '—', count: group._count.id, amount: asMoney(group._sum.amount) };
+      }),
+      quickAlerts: {
+        lowBalances: lowWallets.map(wallet => ({ studentName: wallet.student.fullName, studentCode: wallet.student.studentCode, schoolName: wallet.student.school.name, balance: asMoney(wallet.balance) })),
+        dailyLimitReached: dailyLimitReached.slice(0, 5).map(item => ({ studentName: item.student.fullName, studentCode: item.student.studentCode, schoolName: item.student.school.name, spentToday: asMoney(Math.max(0, item.debit - item.refund)), dailyLimit: asMoney(item.student.dailyLimit) })),
+        failedLogins,
+        repeatedRefunds,
+        revokedAttempts
+      },
+      canteen: { unsettledTotal: asMoney(canteenUnsettledTotal), canteensWithDue }
+    });
   } catch (error) { next(error); }
 });
 

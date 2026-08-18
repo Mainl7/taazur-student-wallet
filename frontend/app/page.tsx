@@ -1,45 +1,189 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import AdminShell from './components/AdminShell';
 import { apiFetch } from './lib/api';
 
-type Dashboard = { schools: number; students: number; walletBalance: string; todayTransactions: number; todaySpent: string; revokedCards: number };
+type Period = 'today' | 'week' | 'month';
+type School = { id: string; name: string; schoolCode: string };
+type DaySpend = { date: string; amount: string; count: number; percentage: number };
+type RankedStudent = { studentId: string; fullName: string; studentCode: string; schoolName: string; count: number; amount: string };
+type RankedSchool = { schoolId: string; schoolName: string; schoolCode: string; count: number; amount: string };
+type Dashboard = {
+  schools: number;
+  students: number;
+  walletBalance: string;
+  todayTransactions: number;
+  periodTransactions: number;
+  todaySpent: string;
+  weekSpent: string;
+  monthSpent: string;
+  periodSpent: string;
+  revokedCards: number;
+  alertsCount: number;
+  spendingByDay: DaySpend[];
+  topStudents: RankedStudent[];
+  topSchools: RankedSchool[];
+  quickAlerts: {
+    lowBalances: { studentName: string; studentCode: string; schoolName: string; balance: string }[];
+    dailyLimitReached: { studentName: string; studentCode: string; schoolName: string; spentToday: string; dailyLimit: string }[];
+    failedLogins: number;
+    repeatedRefunds: number;
+    revokedAttempts: number;
+  };
+  canteen: { unsettledTotal: string; canteensWithDue: number };
+};
+
+const periodLabels: Record<Period, string> = { today: 'اليوم', week: 'الأسبوع', month: 'الشهر' };
 
 export default function DashboardPage() {
   const [data, setData] = useState<Dashboard | null>(null);
+  const [schools, setSchools] = useState<School[]>([]);
+  const [period, setPeriod] = useState<Period>('today');
+  const [schoolId, setSchoolId] = useState('');
   const [message, setMessage] = useState('');
 
-  useEffect(() => {
-    const load = async () => {
-      const response = await apiFetch('/dashboard');
-      if (response.status === 401) return location.assign('/login');
-      if (!response.ok) return setMessage('تتطلب لوحة الإدارة حساب مدير أو مدقق.');
-      setData(await response.json());
-    };
-    void load();
-  }, []);
+  const load = async (nextPeriod = period, nextSchoolId = schoolId) => {
+    const query = new URLSearchParams({ period: nextPeriod, ...(nextSchoolId ? { schoolId: nextSchoolId } : {}) });
+    const [dashboardResponse, schoolsResponse] = await Promise.all([
+      apiFetch(`/dashboard?${query}`),
+      apiFetch('/schools')
+    ]);
 
+    if (dashboardResponse.status === 401 || schoolsResponse.status === 401) return location.assign('/login');
+    if (!dashboardResponse.ok) return setMessage('تتطلب لوحة الإدارة حساب مدير أو مدقق.');
+
+    const schoolData: { schools?: School[] } = await schoolsResponse.json();
+    setSchools(Array.isArray(schoolData.schools) ? schoolData.schools : []);
+    setData(await dashboardResponse.json());
+    setMessage('');
+  };
+
+  useEffect(() => { void load('today', ''); }, []);
+
+  const selectedSchoolName = useMemo(() => schools.find(school => school.id === schoolId)?.name ?? 'كل المدارس', [schoolId, schools]);
   const stats = data ? [
-    ['المدارس', data.schools],
-    ['الطلاب النشطون', data.students],
-    ['إجمالي الرصيد', `${data.walletBalance} ر.س`],
-    ['عمليات اليوم', data.todayTransactions],
+    ['إجمالي رصيد المحافظ', `${data.walletBalance} ر.س`],
     ['مصروف اليوم', `${data.todaySpent} ر.س`],
-    ['البطاقات الملغاة', data.revokedCards]
+    ['مصروف هذا الأسبوع', `${data.weekSpent} ر.س`],
+    ['مصروف هذا الشهر', `${data.monthSpent} ر.س`],
+    ['الطلاب النشطون', data.students],
+    ['البطاقات الملغاة', data.revokedCards],
+    ['التنبيهات الحالية', data.alertsCount]
   ] : [];
+
+  function changePeriod(nextPeriod: Period) {
+    setPeriod(nextPeriod);
+    void load(nextPeriod, schoolId);
+  }
+
+  function changeSchool(nextSchoolId: string) {
+    setSchoolId(nextSchoolId);
+    void load(period, nextSchoolId);
+  }
 
   return (
     <AdminShell>
-      <header><div><strong>لوحة إدارة المصروف المدرسي</strong><span> متابعة حيّة للمحافظ والبطاقات وعمليات المقصف</span></div></header>
-      <h2>نظرة عامة</h2>
+      <header className="dashboard-hero">
+        <div>
+          <strong>لوحة إدارة المصروف المدرسي</strong>
+          <span>وضع اليوم أولًا، ثم مؤشرات الشهر والتنبيهات التي تحتاج إجراء.</span>
+        </div>
+        <div className="dashboard-filters">
+          <label>الفترة
+            <select value={period} onChange={event => changePeriod(event.target.value as Period)}>
+              <option value="today">اليوم</option>
+              <option value="week">الأسبوع</option>
+              <option value="month">الشهر</option>
+            </select>
+          </label>
+          <label>المدرسة
+            <select value={schoolId} onChange={event => changeSchool(event.target.value)}>
+              <option value="">كل المدارس</option>
+              {schools.map(school => <option key={school.id} value={school.id}>{school.name} — {school.schoolCode}</option>)}
+            </select>
+          </label>
+        </div>
+      </header>
+
       {message && <p role="status">{message}</p>}
-      <div className="cards">{stats.map(([label, value]) => <article key={String(label)}><small>{label}</small><b>{value}</b></article>)}</div>
-      <div className="panel">
-        <h3>إجراءات سريعة</h3>
-        <p>ابدأ من أكثر المهام استخدامًا: إدارة الطلاب، متابعة العمليات، مراجعة التنبيهات، أو تصدير التقارير.</p>
-        <a href="/students">إدارة الطلاب ←</a> <a href="/wallets">شحن المحافظ ←</a> <a href="/reports">التقارير ←</a> <a href="/alerts">التنبيهات ←</a> <a href="/exports">التصدير ←</a>
-      </div>
+
+      <section className="dashboard-section">
+        <div className="section-title">
+          <h2>وضع اليوم</h2>
+          <span>{selectedSchoolName}</span>
+        </div>
+        <div className="cards dashboard-cards">{stats.map(([label, value]) => <article key={String(label)}><small>{label}</small><b>{value}</b></article>)}</div>
+      </section>
+
+      <section className="dashboard-section">
+        <div className="section-title">
+          <h2>مصروف آخر 7 أيام</h2>
+          <span>يساعدك تلاحظ الارتفاع المفاجئ بسرعة</span>
+        </div>
+        <div className="chart-card">
+          {data?.spendingByDay.map(day => (
+            <div className="bar-item" key={day.date}>
+              <span>{new Date(day.date).toLocaleDateString('ar-SA', { weekday: 'short' })}</span>
+              <div className="bar-track"><i style={{ height: `${Math.max(8, day.percentage)}%` }} /></div>
+              <strong>{day.amount}</strong>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="dashboard-section">
+        <div className="section-title">
+          <h2>مؤشرات {periodLabels[period]}</h2>
+          <span>مصروف الفترة: {data?.periodSpent ?? '0.00'} ر.س — العمليات: {data?.periodTransactions ?? 0}</span>
+        </div>
+        <div className="two-columns">
+          <article className="panel">
+            <h3>أكثر 5 مدارس نشاطًا</h3>
+            <table><thead><tr><th>المدرسة</th><th>العمليات</th><th>المصروف</th></tr></thead><tbody>{data?.topSchools.map(school => <tr key={school.schoolId}><td>{school.schoolName}<br /><small>{school.schoolCode}</small></td><td>{school.count}</td><td>{school.amount} ر.س</td></tr>)}</tbody></table>
+          </article>
+          <article className="panel">
+            <h3>أكثر 5 طلاب استخدامًا</h3>
+            <table><thead><tr><th>الطالب</th><th>المدرسة</th><th>العمليات</th><th>المصروف</th></tr></thead><tbody>{data?.topStudents.map(student => <tr key={student.studentId}><td>{student.fullName}<br /><small>{student.studentCode}</small></td><td>{student.schoolName}</td><td>{student.count}</td><td>{student.amount} ر.س</td></tr>)}</tbody></table>
+          </article>
+        </div>
+      </section>
+
+      <section className="dashboard-section">
+        <div className="two-columns">
+          <article className="panel action-alerts">
+            <div className="section-title compact">
+              <h2>تنبيهات تحتاج إجراء</h2>
+              <a href="/alerts">عرض كل التنبيهات ←</a>
+            </div>
+            {data?.quickAlerts.lowBalances.slice(0, 3).map(item => <p key={`${item.studentCode}-${item.schoolName}`}>رصيد منخفض: {item.studentName} — {item.balance} ر.س</p>)}
+            {data?.quickAlerts.dailyLimitReached.slice(0, 3).map(item => <p key={`${item.studentCode}-${item.schoolName}`}>وصل الحد اليومي: {item.studentName} — {item.spentToday}/{item.dailyLimit} ر.س</p>)}
+            {!!data?.quickAlerts.failedLogins && <p>محاولات دخول فاشلة كثيرة: {data.quickAlerts.failedLogins}</p>}
+            {!!data?.quickAlerts.repeatedRefunds && <p>استرجاعات متكررة: {data.quickAlerts.repeatedRefunds}</p>}
+            {!!data?.quickAlerts.revokedAttempts && <p>محاولات بطاقة ملغاة: {data.quickAlerts.revokedAttempts}</p>}
+            {data && data.alertsCount === 0 && <p className="empty-state">لا توجد تنبيهات حاليًا.</p>}
+          </article>
+
+          <article className="panel canteen-overview">
+            <h2>ملخص المقصف</h2>
+            <div className="canteen-number">
+              <small>إجمالي المستحقات غير المسددة</small>
+              <strong>{data?.canteen.unsettledTotal ?? '0.00'} ر.س</strong>
+            </div>
+            <p>عدد المقاصف التي عليها مبالغ: <strong>{data?.canteen.canteensWithDue ?? 0}</strong></p>
+            <a href="/canteen-settlements">تسوية المقصف ←</a>
+          </article>
+        </div>
+      </section>
+
+      <section className="panel quick-actions">
+        <h2>إجراءات سريعة</h2>
+        <a href="/students">إضافة طالب ←</a>
+        <a href="/wallets">شحن محفظة ←</a>
+        <a href="/cards">طباعة البطاقات ←</a>
+        <a href="/exports">تصدير تقرير شهري ←</a>
+        <a href="/canteen-users">إنشاء حساب مقصف ←</a>
+      </section>
     </AdminShell>
   );
 }

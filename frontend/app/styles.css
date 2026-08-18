@@ -104,7 +104,25 @@ dl{display:grid;gap:8px;margin:0}dt{color:var(--muted);font-weight:800}dd{margin
 .notice.error{background:#fff0f0;border-color:#f1aaaa;color:#991b1b}
 .notice.info{background:#eef7ff;border-color:#b9dcff;color:#164e83}
 .danger-button{background:linear-gradient(135deg,#b42318,#d92d20);box-shadow:0 12px 24px rgba(180,35,24,.2)}
+.dashboard-hero{align-items:flex-start}
+.dashboard-hero strong{display:block;margin-bottom:6px}
+.dashboard-filters{display:flex;gap:12px;flex-wrap:wrap;align-items:end}
+.dashboard-filters label{min-width:180px}
+.dashboard-section{display:block;min-height:0;flex:none;padding:0;margin:0 0 24px}
+.section-title{display:flex;align-items:end;justify-content:space-between;gap:12px;margin:0 0 14px}
+.section-title h2{margin:0}.section-title span{color:var(--muted);font-weight:700}.section-title.compact{align-items:center;margin-bottom:10px}
+.dashboard-cards{grid-template-columns:repeat(7,minmax(120px,1fr))}
+.chart-card{display:grid;grid-template-columns:repeat(7,1fr);gap:14px;align-items:end;min-height:250px;background:rgba(255,255,255,.92);border:1px solid rgba(220,231,225,.9);border-radius:20px;box-shadow:var(--shadow);padding:22px}
+.bar-item{display:grid;grid-template-rows:auto 1fr auto;gap:8px;justify-items:center;min-height:205px;color:var(--muted);font-size:12px;font-weight:800}
+.bar-track{position:relative;width:100%;max-width:46px;height:150px;border-radius:999px;background:#edf5f0;overflow:hidden;border:1px solid #dbe9e2}
+.bar-track i{position:absolute;inset:auto 0 0;display:block;border-radius:999px;background:linear-gradient(180deg,var(--gold),var(--green));min-height:8px}
+.bar-item strong{font-size:11px;color:var(--green)}
+.action-alerts p{margin:8px 0;padding:10px 12px;border-radius:12px;background:#fff8e8;border:1px solid #eedaa4;color:#775a17}
+.canteen-overview{background:linear-gradient(135deg,rgba(11,90,66,.96),rgba(7,70,49,.94));color:#fff}
+.canteen-overview h2,.canteen-overview p,.canteen-overview small{color:#fff}.canteen-overview a{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.2);color:#fff}
+.canteen-number strong{display:block;font-size:36px;color:#f1d186;margin:8px 0 12px}.canteen-number small{font-weight:800;opacity:.86}
+.quick-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.quick-actions h2{width:100%;margin-top:0}
 @media(max-width:1000px){.cards{grid-template-columns:repeat(2,minmax(150px,1fr))}.entry,.entry.students{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:1000px){.report-grid,.alert-grid,.export-grid,.two-columns{grid-template-columns:1fr}.pos-summary{grid-template-columns:1fr}}
+@media(max-width:1000px){.report-grid,.alert-grid,.export-grid,.two-columns{grid-template-columns:1fr}.pos-summary{grid-template-columns:1fr}.dashboard-cards{grid-template-columns:repeat(2,minmax(150px,1fr))}.chart-card{overflow-x:auto}.bar-item{min-width:80px}}
 @media(max-width:700px){main{display:block}aside{position:relative;width:auto;height:auto;padding:18px}.brand{min-height:124px}.brand img{max-height:112px}nav{grid-template-columns:repeat(2,1fr);margin-top:16px}nav a{justify-content:center;background:rgba(255,255,255,.1)}section{padding:18px}.management{padding:0}header{display:grid}.cards{grid-template-columns:1fr}.entry,.entry.students{grid-template-columns:1fr}table{display:block;overflow-x:auto;font-size:12px}th,td{padding:10px}.brand.compact img{width:176px;max-height:148px}.pos h1{font-size:28px}}
 @media print{body{background:#fff}aside,header,form,[role=status],button{display:none!important}section{padding:0}.management{max-width:none}table,thead,tbody,tr,td{display:block;border:0!important}th,td:not(:has(.student-print-card)){display:none!important}tr{break-inside:avoid;float:right;margin:0 0 4mm 4mm}.student-print-card{width:85.6mm;height:54mm;min-width:0;box-shadow:none;border-radius:4mm;padding:4mm;grid-template-columns:1fr 25mm}.student-card-info small{font-size:9pt}.student-card-info strong{font-size:14pt}.student-card-info span{font-size:8.5pt}.student-card-qr{border-radius:3mm;padding:1.7mm}.qr-code{width:21mm;height:21mm}.barcode-downloads{display:none!important}.token{white-space:normal}}
