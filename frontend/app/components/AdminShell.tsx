@@ -33,6 +33,10 @@ export default function AdminShell({ children }: { children: ReactNode }) {
           <a href="/cards">البطاقات</a>
           <a href="/wallets">المحافظ</a>
           <a href="/canteen-users">حسابات المقصف</a>
+          <a href="/canteen-settlements">تسوية المقصف</a>
+          <a href="/reports">التقارير</a>
+          <a href="/alerts">التنبيهات</a>
+          <a href="/exports">التصدير</a>
           <a href="/transactions">العمليات</a>
           <a href="/audit-logs">التدقيق</a>
           <LogoutButton />

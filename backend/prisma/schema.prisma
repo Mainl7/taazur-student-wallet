@@ -40,6 +40,8 @@ model User {
   schoolId String?
   school School? @relation(fields: [schoolId], references: [id])
   transactions WalletTransaction[] @relation("performedBy")
+  canteenSettlements CanteenSettlement[] @relation("canteenSettlements")
+  settlementsMade CanteenSettlement[] @relation("settledBy")
   auditLogs AuditLog[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -55,6 +57,7 @@ model School {
   students Student[]
   users User[]
   transactions WalletTransaction[]
+  canteenSettlements CanteenSettlement[]
   auditLogs AuditLog[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -116,6 +119,25 @@ model WalletTransaction {
   @@index([studentId, createdAt])
   @@index([schoolId, createdAt])
 }
+
+model CanteenSettlement {
+  id String @id @default(cuid())
+  schoolId String?
+  school School? @relation(fields: [schoolId], references: [id])
+  canteenUserId String
+  canteenUser User @relation("canteenSettlements", fields: [canteenUserId], references: [id])
+  amount Decimal @db.Decimal(12,2)
+  transactionCount Int
+  periodStart DateTime
+  periodEnd DateTime
+  note String?
+  settledById String
+  settledBy User @relation("settledBy", fields: [settledById], references: [id])
+  createdAt DateTime @default(now())
+  @@index([canteenUserId, createdAt])
+  @@index([schoolId, createdAt])
+}
+
 model AuditLog {
   id String @id @default(cuid())
   userId String?

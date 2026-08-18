@@ -37,8 +37,8 @@ export default function DashboardPage() {
       <div className="cards">{stats.map(([label, value]) => <article key={String(label)}><small>{label}</small><b>{value}</b></article>)}</div>
       <div className="panel">
         <h3>إجراءات سريعة</h3>
-        <p>ابدأ من أكثر المهام استخدامًا: إدارة الطلاب، متابعة العمليات، أو مراجعة سجل التدقيق.</p>
-        <a href="/students">إدارة الطلاب ←</a> <a href="/wallets">شحن المحافظ ←</a> <a href="/transactions">سجل العمليات ←</a> <a href="/audit-logs">سجل التدقيق ←</a>
+        <p>ابدأ من أكثر المهام استخدامًا: إدارة الطلاب، متابعة العمليات، مراجعة التنبيهات، أو تصدير التقارير.</p>
+        <a href="/students">إدارة الطلاب ←</a> <a href="/wallets">شحن المحافظ ←</a> <a href="/reports">التقارير ←</a> <a href="/alerts">التنبيهات ←</a> <a href="/exports">التصدير ←</a>
       </div>
     </AdminShell>
   );

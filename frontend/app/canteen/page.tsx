@@ -7,6 +7,10 @@ import BrandLogo from '../components/BrandLogo';
 import { apiFetch } from '../lib/api';
 
 type MeResponse = { user?: { role: string }; error?: string };
+type Notice = { text: string; tone: 'success' | 'error' | 'info' };
+type LookupStudent = { id: string; fullName: string; studentCode: string; grade: string; schoolName: string; balance: string; dailyLimit: string; todaySpent: string; todayRemaining: string };
+type CanteenSummary = { debit: string; refund: string; net: string; transactionCount: number; periodStart: string };
+type DebitTransaction = { id: string; amount: string; balanceAfter: string; reference: string; student?: { fullName: string; studentCode: string } };
 
 const scannerHints = new Map<DecodeHintType, unknown>([
   [
@@ -17,10 +21,14 @@ const scannerHints = new Map<DecodeHintType, unknown>([
 ]);
 
 export default function Canteen() {
-  const [notice, setNotice] = useState('');
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [authorized, setAuthorized] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [lookup, setLookup] = useState<LookupStudent | null>(null);
+  const [summary, setSummary] = useState<CanteenSummary | null>(null);
+  const [lastTransaction, setLastTransaction] = useState<DebitTransaction | null>(null);
   const cardInput = useRef<HTMLInputElement>(null);
+  const amountInput = useRef<HTMLInputElement>(null);
   const video = useRef<HTMLVideoElement>(null);
   const scannerControls = useRef<IScannerControls | null>(null);
 
@@ -30,11 +38,12 @@ export default function Canteen() {
       if (response.status === 401) return location.assign('/login');
       const data: MeResponse = await response.json();
       if (data.user?.role !== 'CANTEEN_OPERATOR') {
-        setNotice('هذه الصفحة مخصصة لموظف المقصف فقط. استخدم لوحة الإدارة من حساب المدير.');
+        setNotice({ tone: 'error', text: 'هذه الصفحة مخصصة لموظف المقصف فقط. استخدم لوحة الإدارة من حساب المدير.' });
         return;
       }
       setAuthorized(true);
       cardInput.current?.focus();
+      void loadSummary();
     };
 
     void checkAccess();
@@ -48,20 +57,40 @@ export default function Canteen() {
     setScanning(false);
   }
 
+  async function loadSummary() {
+    const response = await apiFetch('/canteen/summary');
+    if (!response.ok) return;
+    const data: { summary?: CanteenSummary } = await response.json();
+    if (data.summary) setSummary(data.summary);
+  }
+
+  async function lookupCard(token = cardInput.current?.value ?? '') {
+    const cleanToken = token.trim();
+    setLookup(null);
+    if (cleanToken.length < 20) return;
+    const response = await apiFetch(`/cards/lookup?token=${encodeURIComponent(cleanToken)}`);
+    const data: { student?: LookupStudent; error?: string } = await response.json();
+    if (response.status === 401) return location.assign('/login');
+    if (!response.ok) return setNotice({ tone: 'error', text: `تعذر قراءة البطاقة: ${data.error ?? 'UNKNOWN_ERROR'}` });
+    setLookup(data.student ?? null);
+    setNotice({ tone: 'info', text: `تم التعرف على الطالب: ${data.student?.fullName}. راجع البيانات ثم أدخل مبلغ الخصم.` });
+    amountInput.current?.focus();
+  }
+
   async function startCamera() {
     if (!navigator.mediaDevices?.getUserMedia) {
-      setNotice('هذا المتصفح لا يدعم فتح الكاميرا من داخل الموقع. استخدم Safari/Chrome محدث أو قارئ باركود USB.');
+      setNotice({ tone: 'error', text: 'هذا المتصفح لا يدعم فتح الكاميرا من داخل الموقع. استخدم Safari/Chrome محدث أو قارئ باركود USB.' });
       return;
     }
 
     if (!video.current) {
-      setNotice('تعذر تجهيز نافذة الكاميرا. حدّث الصفحة وحاول مرة أخرى.');
+      setNotice({ tone: 'error', text: 'تعذر تجهيز نافذة الكاميرا. حدّث الصفحة وحاول مرة أخرى.' });
       return;
     }
 
     stopCamera();
     setScanning(true);
-    setNotice('جاري فتح الكاميرا… اسمح للموقع باستخدام الكاميرا ثم وجّهها إلى QR الموجود في بطاقة الطالب.');
+    setNotice({ tone: 'info', text: 'جاري فتح الكاميرا… اسمح للموقع باستخدام الكاميرا ثم وجّهها إلى QR الموجود في بطاقة الطالب.' });
 
     const reader = new BrowserMultiFormatReader(scannerHints, {
       delayBetweenScanAttempts: 180,
@@ -84,19 +113,18 @@ export default function Canteen() {
           const value = result?.getText();
           if (!value) return;
           if (cardInput.current) cardInput.current.value = value.trim();
-          setNotice('تمت قراءة رمز البطاقة. أدخل المبلغ ثم اضغط تأكيد الخصم.');
           stopCamera();
-          cardInput.current?.focus();
+          void lookupCard(value);
         }
       );
     } catch (error) {
       const name = error instanceof DOMException ? error.name : '';
       if (name === 'NotAllowedError') {
-        setNotice('تم رفض صلاحية الكاميرا. من إعدادات المتصفح اسمح للموقع باستخدام الكاميرا ثم جرّب مرة أخرى.');
+        setNotice({ tone: 'error', text: 'تم رفض صلاحية الكاميرا. من إعدادات المتصفح اسمح للموقع باستخدام الكاميرا ثم جرّب مرة أخرى.' });
       } else if (name === 'NotFoundError') {
-        setNotice('لم يتم العثور على كاميرا في هذا الجهاز.');
+        setNotice({ tone: 'error', text: 'لم يتم العثور على كاميرا في هذا الجهاز.' });
       } else {
-        setNotice('تعذر فتح الكاميرا. تأكد أنك تستخدم رابط HTTPS وأن صلاحية الكاميرا مفعلة.');
+        setNotice({ tone: 'error', text: 'تعذر فتح الكاميرا. تأكد أنك تستخدم رابط HTTPS وأن صلاحية الكاميرا مفعلة.' });
       }
       stopCamera();
     }
@@ -110,32 +138,42 @@ export default function Canteen() {
       headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
       body: JSON.stringify(Object.fromEntries(new FormData(form)))
     });
-    const data: { transaction?: { amount: string; balanceAfter: string; reference: string }; error?: string } = await response.json();
+    const data: { transaction?: DebitTransaction; error?: string } = await response.json();
 
     if (response.status === 401) return location.assign('/login');
-    if (!response.ok) return setNotice(`رُفضت العملية: ${data.error ?? 'UNKNOWN_ERROR'}`);
+    if (!response.ok) return setNotice({ tone: 'error', text: `رُفضت العملية: ${data.error ?? 'UNKNOWN_ERROR'}` });
 
+    setLastTransaction(data.transaction ?? null);
     form.reset();
+    setLookup(null);
     cardInput.current?.focus();
-    setNotice(`تم الخصم بنجاح: ${data.transaction!.amount} ر.س — الرصيد المتبقي: ${data.transaction!.balanceAfter} ر.س — رقم العملية: ${data.transaction!.reference}`);
+    setNotice({ tone: 'success', text: `تم الخصم بنجاح من ${data.transaction?.student?.fullName ?? 'الطالب'}: ${data.transaction!.amount} ر.س — الرصيد المتبقي: ${data.transaction!.balanceAfter} ر.س — رقم العملية: ${data.transaction!.reference}` });
+    void loadSummary();
+  }
+
+  async function refundByReference(reference: string) {
+    const response = await apiFetch('/transactions/refund-by-reference', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reference })
+    });
+    const data: { transaction?: { amount: string; balanceAfter: string; reference: string }; error?: string; replayed?: boolean } = await response.json();
+
+    if (response.status === 401) return location.assign('/login');
+    if (!response.ok) return setNotice({ tone: 'error', text: `رُفض الاسترجاع: ${data.error ?? 'UNKNOWN_ERROR'}` });
+
+    cardInput.current?.focus();
+    setLastTransaction(null);
+    setNotice({ tone: 'success', text: `${data.replayed ? 'سبق استرجاع العملية' : 'تم الاسترجاع بنجاح'}: ${data.transaction!.amount} ر.س — الرصيد بعد الاسترجاع: ${data.transaction!.balanceAfter} ر.س` });
+    void loadSummary();
   }
 
   async function refund(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;
-    const response = await apiFetch('/transactions/refund-by-reference', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(Object.fromEntries(new FormData(form)))
-    });
-    const data: { transaction?: { amount: string; balanceAfter: string; reference: string }; error?: string; replayed?: boolean } = await response.json();
-
-    if (response.status === 401) return location.assign('/login');
-    if (!response.ok) return setNotice(`رُفض الاسترجاع: ${data.error ?? 'UNKNOWN_ERROR'}`);
-
+    const reference = String(new FormData(form).get('reference') ?? '').trim();
+    await refundByReference(reference);
     form.reset();
-    cardInput.current?.focus();
-    setNotice(`${data.replayed ? 'سبق استرجاع العملية' : 'تم الاسترجاع بنجاح'}: ${data.transaction!.amount} ر.س — الرصيد بعد الاسترجاع: ${data.transaction!.balanceAfter} ر.س`);
   }
 
   return (
@@ -146,25 +184,34 @@ export default function Canteen() {
 
       {authorized && (
         <>
+          <div className="pos-summary">
+            <article><small>مستحق المقصف الحالي</small><strong>{summary?.net ?? '0.00'} ر.س</strong></article>
+            <article><small>إجمالي الخصومات</small><strong>{summary?.debit ?? '0.00'} ر.س</strong></article>
+            <article><small>إجمالي الاسترجاع</small><strong>{summary?.refund ?? '0.00'} ر.س</strong></article>
+          </div>
+
           <form onSubmit={submit}>
-            <label>رمز البطاقة<input ref={cardInput} name="cardToken" required minLength={20} placeholder="امسح QR أو الباركود هنا" autoComplete="off" /></label>
+            <label>رمز البطاقة<input ref={cardInput} name="cardToken" required minLength={20} placeholder="امسح QR أو الباركود هنا" autoComplete="off" onBlur={() => void lookupCard()} /></label>
             <div className="scan-actions">
+              <button type="button" className="secondary" onClick={() => void lookupCard()}>إظهار الطالب</button>
               <button type="button" className="secondary" onClick={() => void startCamera()} disabled={scanning}>مسح بالكاميرا</button>
               {scanning && <button type="button" className="secondary" onClick={stopCamera}>إيقاف الكاميرا</button>}
             </div>
             <video ref={video} className="scanner-preview" muted playsInline autoPlay hidden={!scanning} />
-            <label>قيمة العملية (ر.س)<input name="amount" required type="number" min="0.01" step="0.01" /></label>
+            {lookup && <div className="student-preview"><strong>{lookup.fullName}</strong><span>{lookup.schoolName} — {lookup.studentCode}</span><span>الرصيد: {lookup.balance} ر.س — المتبقي من الحد اليومي: {lookup.todayRemaining} ر.س</span></div>}
+            <label>قيمة العملية (ر.س)<input ref={amountInput} name="amount" required type="number" min="0.01" step="0.01" /></label>
             <button>تأكيد الخصم</button>
+            {lastTransaction && <button type="button" className="danger-button" onClick={() => void refundByReference(lastTransaction.reference)}>استرجاع آخر عملية: {lastTransaction.amount} ر.س</button>}
           </form>
           <form onSubmit={refund}>
-            <h2>استرجاع عملية</h2>
+            <h2>استرجاع عملية برقمها</h2>
             <label>رقم العملية<input name="reference" required placeholder="الصق رقم العملية هنا" /></label>
             <button>استرجاع المبلغ</button>
           </form>
         </>
       )}
 
-      {notice && <p role="status">{notice}</p>}
+      {notice && <p role="status" className={`notice ${notice.tone}`}>{notice.text}</p>}
     </main>
   );
 }
