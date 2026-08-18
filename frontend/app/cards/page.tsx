@@ -90,7 +90,9 @@ export default function Cards() {
                 {card.status === 'ACTIVE' ? (
                   <Barcode
                     value={card.publicToken}
-                    label={`${card.student.fullName} — ${card.student.studentCode}`}
+                    studentName={card.student.fullName}
+                    studentCode={card.student.studentCode}
+                    schoolName={card.student.school.name}
                     fileName={`taazur-${card.student.studentCode}`}
                     downloadable
                   />

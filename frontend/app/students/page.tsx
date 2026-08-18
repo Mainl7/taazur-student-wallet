@@ -142,7 +142,9 @@ export default function Students() {
                   {token ? (
                     <Barcode
                       value={token}
-                      label={`${student.fullName} — ${student.studentCode}`}
+                      studentName={student.fullName}
+                      studentCode={student.studentCode}
+                      schoolName={student.school.name}
                       fileName={`taazur-${student.studentCode}`}
                       downloadable
                     />
