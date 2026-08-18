@@ -212,6 +212,7 @@ app.get('/api/v1/auth/me', auth, async (req, res, next) => {
 });
 
 const schoolSchema = z.object({ schoolCode: z.string().trim().min(3).max(32), name: z.string().trim().min(3).max(150), city: z.string().trim().min(2).max(80), district: z.string().trim().max(80).optional(), address: z.string().trim().max(300).optional() });
+const schoolUpdateSchema = schoolSchema.extend({ status: z.nativeEnum(EntityStatus).optional() }).partial();
 app.get('/api/v1/schools', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
   try {
     const where = req.claims!.schoolId ? { id: req.claims!.schoolId } : {};
@@ -224,6 +225,37 @@ app.post('/api/v1/schools', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN
     const school = await prisma.school.create({ data: schoolSchema.parse(req.body) });
     await prisma.auditLog.create({ data: { userId: req.claims!.sub, schoolId: school.id, action: 'SCHOOL_CREATED', entity: 'School', entityId: school.id, newValue: cleanJson(school), ip: requestIp(req), userAgent: requestUserAgent(req) } });
     res.status(201).json({ school });
+  } catch (error) { next(error); }
+});
+app.patch('/api/v1/schools/:schoolId', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN), async (req, res, next) => {
+  try {
+    const input = schoolUpdateSchema.parse(req.body);
+    const current = await prisma.school.findUniqueOrThrow({ where: { id: routeParam(req.params.schoolId) } });
+    if (!scopedSchool(req.claims!, current.id)) return res.status(403).json({ error: 'SCHOOL_SCOPE_DENIED' });
+    const school = await prisma.$transaction(async tx => {
+      const updated = await tx.school.update({ where: { id: current.id }, data: input });
+      await audit(tx, req, { action: 'SCHOOL_UPDATED', entity: 'School', entityId: current.id, schoolId: current.id, oldValue: cleanJson(current), newValue: cleanJson(input) });
+      return updated;
+    });
+    res.json({ school });
+  } catch (error) { next(error); }
+});
+app.delete('/api/v1/schools/:schoolId', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN), async (req, res, next) => {
+  try {
+    const schoolId = routeParam(req.params.schoolId);
+    if (!scopedSchool(req.claims!, schoolId)) return res.status(403).json({ error: 'SCHOOL_SCOPE_DENIED' });
+    const [school, activeStudents] = await Promise.all([
+      prisma.school.findUniqueOrThrow({ where: { id: schoolId } }),
+      prisma.student.count({ where: { schoolId, status: EntityStatus.ACTIVE } })
+    ]);
+    if (activeStudents > 0) return res.status(409).json({ error: 'SCHOOL_HAS_ACTIVE_STUDENTS' });
+    const updated = await prisma.$transaction(async tx => {
+      const deleted = await tx.school.update({ where: { id: schoolId }, data: { status: EntityStatus.INACTIVE } });
+      await tx.user.updateMany({ where: { schoolId }, data: { status: EntityStatus.INACTIVE } });
+      await audit(tx, req, { action: 'SCHOOL_DEACTIVATED', entity: 'School', entityId: schoolId, schoolId, oldValue: cleanJson({ status: school.status }), newValue: { status: EntityStatus.INACTIVE } });
+      return deleted;
+    });
+    res.json({ school: updated });
   } catch (error) { next(error); }
 });
 
@@ -278,9 +310,17 @@ app.patch('/api/v1/students/:studentId', auth, roles(Role.SUPER_ADMIN, Role.ASSO
     const input = studentUpdateSchema.parse(req.body);
     const current = await prisma.student.findUniqueOrThrow({ where: { id: routeParam(req.params.studentId) }, select: { id: true, studentCode: true, fullName: true, grade: true, dailyLimit: true, schoolId: true } });
     if (!scopedSchool(req.claims!, current.schoolId) || (input.schoolId && !scopedSchool(req.claims!, input.schoolId))) return res.status(403).json({ error: 'SCHOOL_SCOPE_DENIED' });
+    if (input.schoolId) {
+      const targetSchool = await prisma.school.findUniqueOrThrow({ where: { id: input.schoolId }, select: { status: true } });
+      if (targetSchool.status !== EntityStatus.ACTIVE) return res.status(409).json({ error: 'SCHOOL_INACTIVE' });
+    }
     const student = await prisma.$transaction(async tx => {
       const updated = await tx.student.update({ where: { id: current.id }, data: input });
-      await audit(tx, req, { action: 'STUDENT_UPDATED', entity: 'Student', entityId: current.id, schoolId: updated.schoolId, oldValue: cleanJson({ studentCode: current.studentCode, fullName: current.fullName, grade: current.grade, dailyLimit: Number(current.dailyLimit), schoolId: current.schoolId }), newValue: cleanJson(input) });
+      const moved = input.schoolId && input.schoolId !== current.schoolId;
+      if (moved) {
+        await tx.walletTransaction.updateMany({ where: { studentId: current.id }, data: { schoolId: input.schoolId } });
+      }
+      await audit(tx, req, { action: moved ? 'STUDENT_TRANSFERRED' : 'STUDENT_UPDATED', entity: 'Student', entityId: current.id, schoolId: updated.schoolId, oldValue: cleanJson({ studentCode: current.studentCode, fullName: current.fullName, grade: current.grade, dailyLimit: Number(current.dailyLimit), schoolId: current.schoolId }), newValue: cleanJson({ ...input, transferredTransactions: moved ? true : undefined }) });
       return updated;
     });
     res.json({ student });
@@ -826,7 +866,7 @@ app.get('/api/v1/health', (_req, res) => res.json({ status: 'ok' }));
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
   const prismaCode = typeof error === 'object' && error !== null && 'code' in error ? (error as { code?: string }).code : undefined;
   const message = error instanceof z.ZodError ? 'VALIDATION_ERROR' : prismaCode === 'P2002' ? 'DUPLICATE_RECORD' : error instanceof Error ? error.message : 'INTERNAL_ERROR';
-  const status = message === 'FORBIDDEN' || message === 'ORIGIN_DENIED' ? 403 : message === 'LOGIN_LOCKED' ? 429 : ['INSUFFICIENT_BALANCE', 'STUDENT_INACTIVE', 'SCHOOL_SCOPE_DENIED', 'DAILY_LIMIT_EXCEEDED', 'REFUND_ONLY_DEBIT', 'CARD_REVOKED', 'CARD_NOT_ACTIVE', 'NO_UNSETTLED_AMOUNT'].includes(message) ? 409 : message === 'DUPLICATE_RECORD' ? 409 : message === 'CARD_NOT_FOUND' ? 404 : 400;
+  const status = message === 'FORBIDDEN' || message === 'ORIGIN_DENIED' ? 403 : message === 'LOGIN_LOCKED' ? 429 : ['INSUFFICIENT_BALANCE', 'STUDENT_INACTIVE', 'SCHOOL_SCOPE_DENIED', 'DAILY_LIMIT_EXCEEDED', 'REFUND_ONLY_DEBIT', 'CARD_REVOKED', 'CARD_NOT_ACTIVE', 'NO_UNSETTLED_AMOUNT', 'SCHOOL_HAS_ACTIVE_STUDENTS', 'SCHOOL_INACTIVE'].includes(message) ? 409 : message === 'DUPLICATE_RECORD' ? 409 : message === 'CARD_NOT_FOUND' ? 404 : 400;
   res.status(status).json({ error: message });
 });
 const port = Number(process.env.PORT ?? 4000);

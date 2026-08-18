@@ -5,7 +5,7 @@ import AdminShell from '../components/AdminShell';
 import Barcode from '../components/Barcode';
 import { apiFetch } from '../lib/api';
 
-type School = { id: string; name: string };
+type School = { id: string; name: string; status?: string };
 type Student = {
   id: string;
   studentCode: string;
@@ -71,9 +71,11 @@ export default function Students() {
     if (!response.ok) return setMessage(`تعذر تعديل الطالب: ${data.error ?? 'UNKNOWN_ERROR'}`);
 
     setEditing(null);
-    setMessage('تم تعديل بيانات الطالب والحد اليومي بدون تغيير سجل العمليات السابقة.');
+    setMessage('تم تعديل بيانات الطالب. إذا تغيّرت المدرسة، تم نقل سجلاته المالية للمدرسة الجديدة.');
     void load();
   }
+
+  const activeSchools = schools.filter(school => !school.status || school.status === 'ACTIVE');
 
   return (
     <AdminShell>
@@ -91,7 +93,7 @@ export default function Students() {
         <input name="dailyLimit" type="number" step="0.01" placeholder="الحد اليومي" required />
         <select name="schoolId" required defaultValue="">
           <option value="" disabled>اختر المدرسة</option>
-          {schools.map(school => <option key={school.id} value={school.id}>{school.name}</option>)}
+          {activeSchools.map(school => <option key={school.id} value={school.id}>{school.name}</option>)}
         </select>
         <button>إضافة طالب</button>
       </form>
@@ -104,10 +106,11 @@ export default function Students() {
           <input name="dailyLimit" defaultValue={editing.dailyLimit} type="number" step="0.01" placeholder="الحد اليومي" required />
           <select name="schoolId" required defaultValue={editing.schoolId}>
             <option value="" disabled>اختر المدرسة</option>
-            {schools.map(school => <option key={school.id} value={school.id}>{school.name}</option>)}
+            {activeSchools.map(school => <option key={school.id} value={school.id}>{school.name}</option>)}
           </select>
           <button>حفظ التعديل</button>
           <button type="button" className="secondary" onClick={() => setEditing(null)}>إلغاء</button>
+          <small className="form-note">عند نقل الطالب لمدرسة ثانية سيتم نقل عملياته المالية السابقة للمدرسة الجديدة حتى لا تتكرر الحسابات بين المدرستين.</small>
         </form>
       )}
 

@@ -41,8 +41,11 @@ input,select{width:100%;padding:13px 14px;border:1px solid #cbdad2;border-radius
 input:focus,select:focus{border-color:var(--green-2);box-shadow:0 0 0 4px rgba(15,114,84,.12);background:#fff}
 button{cursor:pointer;background:linear-gradient(135deg,var(--green),var(--green-2));color:#fff;padding:12px 18px;border:0;border-radius:12px;text-decoration:none;font-weight:800;box-shadow:0 12px 24px rgba(11,90,66,.22);transition:.16s ease}
 button:hover{transform:translateY(-1px);box-shadow:0 16px 30px rgba(11,90,66,.28)}
+button:disabled{cursor:not-allowed;opacity:.48;transform:none;box-shadow:none}
 button.secondary{background:#eef5f1;color:var(--green);border:1px solid #cfe2d8;box-shadow:none}
 .edit-box{border-color:rgba(200,164,91,.55);background:linear-gradient(135deg,rgba(255,255,255,.96),rgba(255,251,240,.92))}
+.form-note{grid-column:1/-1;color:var(--muted);line-height:1.7}
+.row-actions{display:flex;gap:8px;flex-wrap:wrap}
 table{width:100%;border-collapse:separate;border-spacing:0;margin-top:20px;border-radius:18px;overflow:hidden}
 th,td{padding:14px;border-bottom:1px solid #e8efeb;text-align:right;vertical-align:middle}
 th{background:#f0f7f3;color:#33564a;font-size:13px}
