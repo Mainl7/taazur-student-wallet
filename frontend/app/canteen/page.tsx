@@ -9,8 +9,9 @@ import { apiFetch } from '../lib/api';
 type MeResponse = { user?: { role: string }; error?: string };
 type Notice = { text: string; tone: 'success' | 'error' | 'info' };
 type LookupStudent = { id: string; fullName: string; studentCode: string; grade: string; schoolName: string; balance: string; dailyLimit: string; todaySpent: string; todayRemaining: string };
-type CanteenSummary = { debit: string; refund: string; net: string; transactionCount: number; periodStart: string };
-type DebitTransaction = { id: string; amount: string; balanceAfter: string; reference: string; student?: { fullName: string; studentCode: string } };
+type Canteen = { id: string; name: string; canteenCode?: string | null; school: { name: string; schoolCode: string } };
+type CanteenSummary = { debit: string; refund: string; net: string; transactionCount: number; periodStart: string; canteen?: { name: string } | null };
+type DebitTransaction = { id: string; amount: string; balanceAfter: string; reference: string; student?: { fullName: string; studentCode: string }; canteen?: { name: string } | null };
 
 const scannerHints = new Map<DecodeHintType, unknown>([
   [
@@ -25,6 +26,8 @@ export default function Canteen() {
   const [authorized, setAuthorized] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [lookup, setLookup] = useState<LookupStudent | null>(null);
+  const [canteens, setCanteens] = useState<Canteen[]>([]);
+  const [selectedCanteenId, setSelectedCanteenId] = useState('');
   const [summary, setSummary] = useState<CanteenSummary | null>(null);
   const [lastTransaction, setLastTransaction] = useState<DebitTransaction | null>(null);
   const cardInput = useRef<HTMLInputElement>(null);
@@ -43,12 +46,16 @@ export default function Canteen() {
       }
       setAuthorized(true);
       cardInput.current?.focus();
-      void loadSummary();
+      void loadCanteens();
     };
 
     void checkAccess();
     return stopCamera;
   }, []);
+
+  useEffect(() => {
+    if (authorized) void loadSummary();
+  }, [authorized, selectedCanteenId]);
 
   function stopCamera() {
     scannerControls.current?.stop();
@@ -58,17 +65,29 @@ export default function Canteen() {
   }
 
   async function loadSummary() {
-    const response = await apiFetch('/canteen/summary');
+    const query = selectedCanteenId ? `?canteenId=${encodeURIComponent(selectedCanteenId)}` : '';
+    const response = await apiFetch(`/canteen/summary${query}`);
     if (!response.ok) return;
     const data: { summary?: CanteenSummary } = await response.json();
     if (data.summary) setSummary(data.summary);
+  }
+
+  async function loadCanteens() {
+    const response = await apiFetch('/canteens');
+    if (!response.ok) return void loadSummary();
+    const data: { canteens?: Canteen[] } = await response.json();
+    const nextCanteens = Array.isArray(data.canteens) ? data.canteens : [];
+    setCanteens(nextCanteens);
+    setSelectedCanteenId(current => current || nextCanteens[0]?.id || '');
+    if (!nextCanteens.length) void loadSummary();
   }
 
   async function lookupCard(token = cardInput.current?.value ?? '') {
     const cleanToken = token.trim();
     setLookup(null);
     if (cleanToken.length < 20) return;
-    const response = await apiFetch(`/cards/lookup?token=${encodeURIComponent(cleanToken)}`);
+    const query = new URLSearchParams({ token: cleanToken, ...(selectedCanteenId ? { canteenId: selectedCanteenId } : {}) });
+    const response = await apiFetch(`/cards/lookup?${query}`);
     const data: { student?: LookupStudent; error?: string } = await response.json();
     if (response.status === 401) return location.assign('/login');
     if (!response.ok) return setNotice({ tone: 'error', text: `تعذر قراءة البطاقة: ${data.error ?? 'UNKNOWN_ERROR'}` });
@@ -191,6 +210,15 @@ export default function Canteen() {
           </div>
 
           <form onSubmit={submit}>
+            {canteens.length > 0 && (
+              <label>
+                المقصف
+                <select value={selectedCanteenId} onChange={event => { setSelectedCanteenId(event.target.value); setLookup(null); }}>
+                  {canteens.map(canteen => <option key={canteen.id} value={canteen.id}>{canteen.name} — {canteen.school.name}</option>)}
+                </select>
+              </label>
+            )}
+            {selectedCanteenId && <input type="hidden" name="canteenId" value={selectedCanteenId} />}
             <label>رمز البطاقة<input ref={cardInput} name="cardToken" required minLength={20} placeholder="امسح QR أو الباركود هنا" autoComplete="off" onBlur={() => void lookupCard()} /></label>
             <div className="scan-actions">
               <button type="button" className="secondary" onClick={() => void lookupCard()}>إظهار الطالب</button>
