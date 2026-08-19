@@ -361,6 +361,11 @@ app.get('/api/v1/cards', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, R
 });
 
 const topUpSchema = z.object({ studentId: z.string().cuid(), amount: z.coerce.number().positive().max(10000) });
+const bulkTopUpSchema = z.object({
+  schoolId: z.string().cuid(),
+  amount: z.coerce.number().positive().max(10000),
+  studentIds: z.array(z.string().cuid()).max(500).optional()
+});
 app.post('/api/v1/wallets/top-up', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN), async (req, res, next) => {
   try {
     const input = topUpSchema.parse(req.body);
@@ -379,6 +384,91 @@ app.post('/api/v1/wallets/top-up', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATIO
       return created;
     });
     res.status(201).json({ transaction });
+  } catch (error) { next(error); }
+});
+app.post('/api/v1/wallets/bulk-top-up', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN), async (req, res, next) => {
+  try {
+    const input = bulkTopUpSchema.parse(req.body);
+    if (!scopedSchool(req.claims!, input.schoolId)) return res.status(403).json({ error: 'SCHOOL_SCOPE_DENIED' });
+
+    const school = await prisma.school.findUniqueOrThrow({ where: { id: input.schoolId }, select: { id: true, name: true, status: true } });
+    if (school.status !== EntityStatus.ACTIVE) return res.status(409).json({ error: 'SCHOOL_INACTIVE' });
+
+    const uniqueStudentIds = [...new Set(input.studentIds ?? [])];
+    const where = {
+      schoolId: input.schoolId,
+      status: EntityStatus.ACTIVE,
+      ...(uniqueStudentIds.length ? { id: { in: uniqueStudentIds } } : {})
+    };
+
+    const students = await prisma.student.findMany({
+      where,
+      include: { wallet: true },
+      orderBy: { fullName: 'asc' }
+    });
+
+    if (uniqueStudentIds.length && students.length !== uniqueStudentIds.length) return res.status(400).json({ error: 'INVALID_STUDENT_SELECTION' });
+    if (!students.length) return res.status(400).json({ error: 'NO_ACTIVE_STUDENTS' });
+    if (students.some(student => !student.wallet)) return res.status(409).json({ error: 'WALLET_NOT_FOUND' });
+
+    const result = await prisma.$transaction(async tx => {
+      const transactions = [];
+
+      for (const student of students) {
+        const rows = await tx.$queryRaw<Array<{ id: string; balance: unknown }>>`SELECT id, balance FROM Wallet WHERE id = ${student.wallet!.id} FOR UPDATE`;
+        const wallet = rows[0];
+        if (!wallet) throw new Error('WALLET_NOT_FOUND');
+
+        const balanceBefore = Number(wallet.balance);
+        const balanceAfter = balanceBefore + input.amount;
+        await tx.wallet.update({ where: { id: wallet.id }, data: { balance: balanceAfter } });
+        const created = await tx.walletTransaction.create({
+          data: {
+            reference: randomUUID(),
+            walletId: wallet.id,
+            studentId: student.id,
+            schoolId: student.schoolId,
+            amount: input.amount,
+            type: TransactionType.CREDIT,
+            balanceBefore,
+            balanceAfter,
+            performedById: req.claims!.sub
+          }
+        });
+        await audit(tx, req, {
+          action: 'WALLET_BULK_TOP_UP',
+          entity: 'WalletTransaction',
+          entityId: created.id,
+          schoolId: student.schoolId,
+          newValue: cleanJson({ studentId: student.id, amount: input.amount, balanceBefore, balanceAfter, schoolId: input.schoolId })
+        });
+        transactions.push(created);
+      }
+
+      await audit(tx, req, {
+        action: 'WALLET_BULK_TOP_UP_BATCH',
+        entity: 'School',
+        entityId: school.id,
+        schoolId: school.id,
+        newValue: cleanJson({
+          schoolId: school.id,
+          schoolName: school.name,
+          mode: uniqueStudentIds.length ? 'SELECTED_STUDENTS' : 'WHOLE_SCHOOL',
+          amountPerStudent: input.amount,
+          studentCount: students.length,
+          totalAmount: input.amount * students.length
+        })
+      });
+
+      return {
+        count: transactions.length,
+        amountPerStudent: input.amount.toFixed(2),
+        totalAmount: (input.amount * transactions.length).toFixed(2),
+        transactionIds: transactions.map(transaction => transaction.id)
+      };
+    });
+
+    res.status(201).json({ batch: result });
   } catch (error) { next(error); }
 });
 app.get('/api/v1/transactions', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
