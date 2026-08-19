@@ -13,7 +13,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
       const response = await apiFetch('/auth/me');
       if (response.status === 401) return location.assign('/login');
       const data: { user?: { role: string } } = await response.json();
-      if (data.user?.role === 'CANTEEN_OPERATOR') return location.assign('/canteen');
+      if (data.user?.role === 'CANTEEN_OPERATOR') return location.assign('/canteen-owner');
       setAllowed(true);
     };
 
@@ -32,8 +32,8 @@ export default function AdminShell({ children }: { children: ReactNode }) {
           <a href="/students">الطلاب</a>
           <a href="/cards">البطاقات</a>
           <a href="/wallets">المحافظ</a>
-          <a href="/canteen-users">حسابات المقصف</a>
-          <a href="/canteen-settlements">تسوية المقصف</a>
+          <a href="/canteen-users">ملاك المقاصف</a>
+          <a href="/canteen-settlements">تسوية المقاصف</a>
           <a href="/reports">التقارير</a>
           <a href="/alerts">التنبيهات</a>
           <a href="/exports">التصدير</a>

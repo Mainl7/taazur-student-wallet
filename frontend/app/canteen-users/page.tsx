@@ -102,42 +102,38 @@ export default function CanteenUsers() {
     <AdminShell>
       <header>
         <div>
-          <h1>حسابات ومقاصف المشغّلين</h1>
-          <span>أنشئ حساب المؤسسة/المشغّل ثم أضف المقاصف التابعة له حسب المدرسة</span>
+          <h1>ملاك المقاصف</h1>
+          <span>أنشئ حساب مالك المقصف، ثم اربط تحته المقاصف التابعة له والمدرسة الخاصة بكل مقصف</span>
         </div>
-        <a href="/canteen">فتح صفحة المقصف ←</a>
+        <a href="/canteen-owner">واجهة مالك المقصف ←</a>
       </header>
 
       <section className="dashboard-section">
         <div className="section-title compact">
-          <h2>إنشاء حساب مشغّل مقصف</h2>
-          <span>يمكن للمشغّل امتلاك مقصف واحد أو عدة مقاصف</span>
+          <h2>إنشاء حساب مالك مقصف</h2>
+          <span>الحساب لا يرتبط بمدرسة مباشرة؛ الربط يتم من خلال المقاصف التابعة له</span>
         </div>
         <form className="entry" onSubmit={createUser}>
-          <input name="email" type="email" placeholder="بريد حساب المشغّل" autoComplete="off" required />
+          <input name="email" type="email" placeholder="بريد مالك المقصف" autoComplete="off" required />
           <input name="password" type="password" minLength={12} placeholder="كلمة مرور 12 حرف أو أكثر" autoComplete="new-password" required />
-          <select name="schoolId" defaultValue="">
-            <option value="">بدون حصر بمدرسة واحدة</option>
-            {activeSchools.map(school => <option key={school.id} value={school.id}>{school.name} — {school.schoolCode}</option>)}
-          </select>
           <button>إنشاء الحساب</button>
         </form>
       </section>
 
       <section className="dashboard-section">
         <div className="section-title compact">
-          <h2>إضافة مقصف تابع لمشغّل</h2>
-          <span>كل مقصف يربط الإيرادات بمدرسة محددة</span>
+          <h2>إضافة مقصف تابع لمالك</h2>
+          <span>اختر المدرسة التي يخدمها المقصف، ثم اختر مالك المقصف</span>
         </div>
         <form className="entry" onSubmit={createCanteen}>
-          <input name="name" placeholder="اسم المقصف مثل: مقصف ابتدائية النور" required />
+          <input name="name" placeholder="اسم المقصف" required />
           <input name="canteenCode" placeholder="رمز اختياري للمقصف" />
           <select name="schoolId" required defaultValue="">
             <option value="" disabled>اختر المدرسة</option>
             {activeSchools.map(school => <option key={school.id} value={school.id}>{school.name} — {school.schoolCode}</option>)}
           </select>
           <select name="operatorId" required defaultValue="">
-            <option value="" disabled>اختر المشغّل</option>
+            <option value="" disabled>اختر مالك المقصف</option>
             {users.map(user => <option key={user.id} value={user.id}>{user.email}</option>)}
           </select>
           <button>إضافة المقصف</button>
@@ -149,7 +145,7 @@ export default function CanteenUsers() {
       {resetUser && (
         <section className="dashboard-section">
           <div className="section-title compact">
-            <h2>تغيير كلمة مرور المشغّل</h2>
+            <h2>تغيير كلمة مرور مالك المقصف</h2>
             <span>لن تظهر كلمة المرور بعد الحفظ، وسيتم إزالة قفل محاولات الدخول الفاشلة لهذا الحساب</span>
           </div>
           <form className="entry" onSubmit={resetPassword}>
@@ -163,14 +159,14 @@ export default function CanteenUsers() {
 
       <h2>المقاصف المسجلة</h2>
       <table>
-        <thead><tr><th>المقصف</th><th>الرمز</th><th>المدرسة</th><th>المشغّل</th><th>الحالة</th></tr></thead>
+        <thead><tr><th>المقصف</th><th>الرمز</th><th>المدرسة</th><th>مالك المقصف</th><th>الحالة</th></tr></thead>
         <tbody>{canteens.map(canteen => <tr key={canteen.id}><td>{canteen.name}</td><td>{canteen.canteenCode ?? '—'}</td><td>{canteen.school.name}<br /><small>{canteen.school.schoolCode}</small></td><td>{canteen.operator.email}</td><td>{canteen.status}</td></tr>)}</tbody>
       </table>
 
-      <h2>حسابات المشغّلين</h2>
+      <h2>حسابات ملاك المقاصف</h2>
       <table>
-        <thead><tr><th>البريد</th><th>حصر الحساب</th><th>المقاصف التابعة</th><th>تاريخ الإنشاء</th><th>الإجراء</th></tr></thead>
-        <tbody>{users.map(user => <tr key={user.id}><td>{user.email}</td><td>{user.school?.name ?? 'غير محصور بمدرسة واحدة'}</td><td>{user.operatedCanteens.length ? user.operatedCanteens.map(canteen => `${canteen.name} (${canteen.school.name})`).join('، ') : 'لم تتم إضافة مقاصف بعد'}</td><td>{new Date(user.createdAt).toLocaleString('ar-SA')}</td><td><button type="button" onClick={() => setResetUser(user)}>تغيير كلمة المرور</button></td></tr>)}</tbody>
+        <thead><tr><th>البريد</th><th>المقاصف التابعة</th><th>تاريخ الإنشاء</th><th>الإجراء</th></tr></thead>
+        <tbody>{users.map(user => <tr key={user.id}><td>{user.email}</td><td>{user.operatedCanteens.length ? user.operatedCanteens.map(canteen => `${canteen.name} (${canteen.school.name})`).join('، ') : 'لم تتم إضافة مقاصف بعد'}</td><td>{new Date(user.createdAt).toLocaleString('ar-SA')}</td><td><button type="button" onClick={() => setResetUser(user)}>تغيير كلمة المرور</button></td></tr>)}</tbody>
       </table>
     </AdminShell>
   );

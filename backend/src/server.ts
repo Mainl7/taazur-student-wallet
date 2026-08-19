@@ -287,7 +287,11 @@ const canteenUserSchema = z.object({ email: z.string().trim().email(), password:
 const canteenPasswordResetSchema = z.object({ password: z.string().min(12).max(128) });
 app.get('/api/v1/canteen-users', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
   try {
-    const where = { role: Role.CANTEEN_OPERATOR, status: EntityStatus.ACTIVE, ...(req.claims!.schoolId ? { schoolId: req.claims!.schoolId } : {}) };
+    const where: Prisma.UserWhereInput = {
+      role: Role.CANTEEN_OPERATOR,
+      status: EntityStatus.ACTIVE,
+      ...(req.claims!.schoolId ? { OR: [{ schoolId: req.claims!.schoolId }, { operatedCanteens: { some: { schoolId: req.claims!.schoolId } } }] } : {})
+    };
     const users = await prisma.user.findMany({ where, select: { id: true, email: true, role: true, schoolId: true, school: { select: { name: true, schoolCode: true } }, operatedCanteens: { where: req.claims!.schoolId ? { schoolId: req.claims!.schoolId } : {}, select: { id: true, name: true, canteenCode: true, status: true, school: { select: { name: true, schoolCode: true } } }, orderBy: { name: 'asc' } }, createdAt: true }, orderBy: { createdAt: 'desc' } });
     res.json({ users });
   } catch (error) { next(error); }
@@ -1152,6 +1156,35 @@ app.get('/api/v1/canteen/summary', auth, roles(Role.CANTEEN_OPERATOR), async (re
     const canteen = await resolveCanteenAccess(prisma, req.claims!, canteenId);
     const summary = canteen.canteenId ? await canteenDueByCanteen(canteen.canteenId, req.claims!) : await canteenDueByUser(req.claims!.sub, req.claims!);
     res.json({ summary });
+  } catch (error) { next(error); }
+});
+
+app.get('/api/v1/canteen/owner-summary', auth, roles(Role.CANTEEN_OPERATOR), async (req, res, next) => {
+  try {
+    const canteens = await prisma.canteen.findMany({
+      where: { operatorId: req.claims!.sub, status: EntityStatus.ACTIVE, ...(req.claims!.schoolId ? { schoolId: req.claims!.schoolId } : {}) },
+      select: { id: true },
+      orderBy: { createdAt: 'desc' }
+    });
+    const summaries = canteens.length
+      ? await Promise.all(canteens.map(canteen => canteenDueByCanteen(canteen.id, req.claims!)))
+      : [await canteenDueByUser(req.claims!.sub, req.claims!)];
+    const totals = summaries.reduce((total, summary) => ({
+      debit: total.debit + money(summary.debit),
+      refund: total.refund + money(summary.refund),
+      net: total.net + money(summary.net),
+      transactionCount: total.transactionCount + summary.transactionCount
+    }), { debit: 0, refund: 0, net: 0, transactionCount: 0 });
+    res.json({
+      summaries,
+      totals: {
+        debit: asMoney(totals.debit),
+        refund: asMoney(totals.refund),
+        net: asMoney(totals.net),
+        transactionCount: totals.transactionCount,
+        canteenCount: canteens.length
+      }
+    });
   } catch (error) { next(error); }
 });
 

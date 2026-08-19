@@ -4,6 +4,7 @@ import { BrowserMultiFormatReader, type IScannerControls } from '@zxing/browser'
 import { BarcodeFormat, DecodeHintType } from '@zxing/library';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import BrandLogo from '../components/BrandLogo';
+import LogoutButton from '../components/LogoutButton';
 import { apiFetch } from '../lib/api';
 
 type MeResponse = { user?: { role: string }; error?: string };
@@ -77,8 +78,10 @@ export default function Canteen() {
     if (!response.ok) return void loadSummary();
     const data: { canteens?: Canteen[] } = await response.json();
     const nextCanteens = Array.isArray(data.canteens) ? data.canteens : [];
+    const requestedCanteenId = new URLSearchParams(location.search).get('canteenId') ?? '';
+    const requestedCanteen = nextCanteens.some(canteen => canteen.id === requestedCanteenId) ? requestedCanteenId : '';
     setCanteens(nextCanteens);
-    setSelectedCanteenId(current => current || nextCanteens[0]?.id || '');
+    setSelectedCanteenId(current => current || requestedCanteen || nextCanteens[0]?.id || '');
     if (!nextCanteens.length) void loadSummary();
   }
 
@@ -198,7 +201,11 @@ export default function Canteen() {
   return (
     <main className="pos">
       <BrandLogo compact />
-      <h1>مقصف المدرسة</h1>
+      <div className="pos-top-actions">
+        <a href="/canteen-owner">مقاصفي ومصاريفي</a>
+        <LogoutButton />
+      </div>
+      <h1>شاشة محاسبة المقصف</h1>
       <p>استخدم قارئ الباركود USB مباشرة، أو افتح كاميرا الجوال/التابلت لمسح QR الموجود في بطاقة الطالب.</p>
 
       {authorized && (
