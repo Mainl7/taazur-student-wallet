@@ -284,6 +284,7 @@ app.delete('/api/v1/schools/:schoolId', auth, roles(Role.SUPER_ADMIN, Role.ASSOC
 });
 
 const canteenUserSchema = z.object({ email: z.string().trim().email(), password: z.string().min(12).max(128), schoolId: z.string().cuid().optional() });
+const canteenPasswordResetSchema = z.object({ password: z.string().min(12).max(128) });
 app.get('/api/v1/canteen-users', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
   try {
     const where = { role: Role.CANTEEN_OPERATOR, status: EntityStatus.ACTIVE, ...(req.claims!.schoolId ? { schoolId: req.claims!.schoolId } : {}) };
@@ -303,6 +304,48 @@ app.post('/api/v1/canteen-users', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION
       return created;
     });
     res.status(201).json({ user });
+  } catch (error) { next(error); }
+});
+
+app.patch('/api/v1/canteen-users/:userId/password', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN), async (req, res, next) => {
+  try {
+    const input = canteenPasswordResetSchema.parse(req.body);
+    const userId = routeParam(req.params.userId);
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        status: true,
+        schoolId: true,
+        operatedCanteens: { select: { schoolId: true } }
+      }
+    });
+
+    if (user.role !== Role.CANTEEN_OPERATOR || user.status !== EntityStatus.ACTIVE) return res.status(400).json({ error: 'INVALID_CANTEEN_OPERATOR' });
+    const visibleSchoolIds = [user.schoolId, ...user.operatedCanteens.map(canteen => canteen.schoolId)].filter(Boolean) as string[];
+    if (req.claims!.schoolId && !visibleSchoolIds.includes(req.claims!.schoolId)) return res.status(403).json({ error: 'SCHOOL_SCOPE_DENIED' });
+
+    const passwordHash = await argon2.hash(input.password);
+    const updated = await prisma.$transaction(async tx => {
+      const result = await tx.user.update({
+        where: { id: user.id },
+        data: { passwordHash },
+        select: { id: true, email: true, role: true, schoolId: true, createdAt: true }
+      });
+      await tx.loginAttempt.deleteMany({ where: { email: user.email.toLowerCase() } });
+      await audit(tx, req, {
+        action: 'CANTEEN_USER_PASSWORD_RESET',
+        entity: 'User',
+        entityId: user.id,
+        schoolId: req.claims!.schoolId ?? user.schoolId ?? user.operatedCanteens[0]?.schoolId ?? null,
+        newValue: { email: user.email, resetBy: req.claims!.sub }
+      });
+      return result;
+    });
+
+    res.json({ user: updated });
   } catch (error) { next(error); }
 });
 

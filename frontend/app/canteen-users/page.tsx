@@ -18,6 +18,7 @@ export default function CanteenUsers() {
   const [schools, setSchools] = useState<School[]>([]);
   const [users, setUsers] = useState<CanteenUser[]>([]);
   const [canteens, setCanteens] = useState<Array<Canteen & { operator: { id: string; email: string } }>>([]);
+  const [resetUser, setResetUser] = useState<CanteenUser | null>(null);
   const [message, setMessage] = useState('');
 
   const activeSchools = useMemo(() => schools.filter(school => school.status === 'ACTIVE'), [schools]);
@@ -77,6 +78,26 @@ export default function CanteenUsers() {
     void load();
   }
 
+  async function resetPassword(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!resetUser) return;
+    const form = e.currentTarget;
+    const password = String(new FormData(form).get('password') ?? '');
+
+    const response = await apiFetch(`/canteen-users/${resetUser.id}/password`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+    const data: { error?: string } = await response.json();
+
+    if (!response.ok) return setMessage(`تعذر تغيير كلمة المرور: ${data.error ?? 'UNKNOWN_ERROR'}`);
+
+    form.reset();
+    setResetUser(null);
+    setMessage(`تم تغيير كلمة مرور ${resetUser.email}. يمكنه تسجيل الدخول بكلمة المرور الجديدة الآن.`);
+  }
+
   return (
     <AdminShell>
       <header>
@@ -125,6 +146,21 @@ export default function CanteenUsers() {
 
       {message && <p role="status">{message}</p>}
 
+      {resetUser && (
+        <section className="dashboard-section">
+          <div className="section-title compact">
+            <h2>تغيير كلمة مرور المشغّل</h2>
+            <span>لن تظهر كلمة المرور بعد الحفظ، وسيتم إزالة قفل محاولات الدخول الفاشلة لهذا الحساب</span>
+          </div>
+          <form className="entry" onSubmit={resetPassword}>
+            <input value={resetUser.email} readOnly aria-label="حساب المشغّل" />
+            <input name="password" type="password" minLength={12} placeholder="كلمة المرور الجديدة 12 حرف أو أكثر" autoComplete="new-password" required />
+            <button>حفظ كلمة المرور الجديدة</button>
+            <button type="button" className="secondary" onClick={() => setResetUser(null)}>إلغاء</button>
+          </form>
+        </section>
+      )}
+
       <h2>المقاصف المسجلة</h2>
       <table>
         <thead><tr><th>المقصف</th><th>الرمز</th><th>المدرسة</th><th>المشغّل</th><th>الحالة</th></tr></thead>
@@ -133,8 +169,8 @@ export default function CanteenUsers() {
 
       <h2>حسابات المشغّلين</h2>
       <table>
-        <thead><tr><th>البريد</th><th>حصر الحساب</th><th>المقاصف التابعة</th><th>تاريخ الإنشاء</th></tr></thead>
-        <tbody>{users.map(user => <tr key={user.id}><td>{user.email}</td><td>{user.school?.name ?? 'غير محصور بمدرسة واحدة'}</td><td>{user.operatedCanteens.length ? user.operatedCanteens.map(canteen => `${canteen.name} (${canteen.school.name})`).join('، ') : 'لم تتم إضافة مقاصف بعد'}</td><td>{new Date(user.createdAt).toLocaleString('ar-SA')}</td></tr>)}</tbody>
+        <thead><tr><th>البريد</th><th>حصر الحساب</th><th>المقاصف التابعة</th><th>تاريخ الإنشاء</th><th>الإجراء</th></tr></thead>
+        <tbody>{users.map(user => <tr key={user.id}><td>{user.email}</td><td>{user.school?.name ?? 'غير محصور بمدرسة واحدة'}</td><td>{user.operatedCanteens.length ? user.operatedCanteens.map(canteen => `${canteen.name} (${canteen.school.name})`).join('، ') : 'لم تتم إضافة مقاصف بعد'}</td><td>{new Date(user.createdAt).toLocaleString('ar-SA')}</td><td><button type="button" onClick={() => setResetUser(user)}>تغيير كلمة المرور</button></td></tr>)}</tbody>
       </table>
     </AdminShell>
   );
