@@ -114,6 +114,15 @@ async function resolveCanteenAccess(client: PrismaClient | Prisma.TransactionCli
   throw new Error('CANTEEN_REQUIRED');
 }
 
+async function assertNotCanteenOwner(client: PrismaClient | Prisma.TransactionClient, claims: Claims) {
+  if (claims.role !== Role.CANTEEN_OPERATOR) return;
+  if (!claims.schoolId) throw new Error('OWNER_CASHIER_DENIED');
+  const ownedCanteens = await client.canteen.count({
+    where: { operatorId: claims.sub, status: EntityStatus.ACTIVE, ...(claims.schoolId ? { schoolId: claims.schoolId } : {}) }
+  });
+  if (ownedCanteens > 0) throw new Error('OWNER_CASHIER_DENIED');
+}
+
 async function audit(tx: Prisma.TransactionClient, req: Request, input: AuditInput) {
   await tx.auditLog.create({
     data: {
@@ -964,6 +973,7 @@ const debitSchema = z.object({ cardToken: z.string().min(20).max(128), amount: z
 
 app.get('/api/v1/cards/lookup', auth, roles(Role.CANTEEN_OPERATOR), async (req, res, next) => {
   try {
+    await assertNotCanteenOwner(prisma, req.claims!);
     const cardToken = typeof req.query.token === 'string' ? req.query.token.trim() : '';
     const canteenId = typeof req.query.canteenId === 'string' ? req.query.canteenId : undefined;
     if (cardToken.length < 20) return res.status(400).json({ error: 'CARD_TOKEN_REQUIRED' });
@@ -1020,6 +1030,7 @@ async function getTodayNetDebit(tx: Prisma.TransactionClient, studentId: string)
 
 app.post('/api/v1/transactions/debit', auth, roles(Role.CANTEEN_OPERATOR), async (req, res, next) => {
   try {
+    await assertNotCanteenOwner(prisma, req.claims!);
     const idempotencyKey = req.header('idempotency-key');
     if (!idempotencyKey) return res.status(400).json({ error: 'IDEMPOTENCY_KEY_REQUIRED' });
     const input = debitSchema.parse(req.body);
@@ -1076,6 +1087,7 @@ async function refundDebit(originalId: string, claims: Claims, req: Request) {
 }
 app.post('/api/v1/transactions/refund-by-reference', auth, roles(Role.CANTEEN_OPERATOR), async (req, res, next) => {
   try {
+    await assertNotCanteenOwner(prisma, req.claims!);
     const input = z.object({ reference: z.string().trim().min(8).max(80) }).parse(req.body);
     const original = await prisma.walletTransaction.findUnique({ where: { reference: input.reference } });
     if (!original) return res.status(404).json({ error: 'TRANSACTION_NOT_FOUND' });
@@ -1097,7 +1109,11 @@ async function canteenDueByUser(canteenUserId: string, claims: Claims) {
   });
   if (canteenUser.role !== Role.CANTEEN_OPERATOR) throw new Error('FORBIDDEN');
   if (canteenUser.schoolId && !scopedSchool(claims, canteenUser.schoolId)) throw new Error('SCHOOL_SCOPE_DENIED');
-  const lastSettlement = await prisma.canteenSettlement.findFirst({ where: { canteenUserId }, orderBy: { periodEnd: 'desc' } });
+  const [lastSettlement, settledAggregate, settlementCount] = await Promise.all([
+    prisma.canteenSettlement.findFirst({ where: { canteenUserId }, orderBy: { periodEnd: 'desc' } }),
+    prisma.canteenSettlement.aggregate({ where: { canteenUserId }, _sum: { amount: true } }),
+    prisma.canteenSettlement.count({ where: { canteenUserId } })
+  ]);
   const periodStart = lastSettlement?.periodEnd ?? new Date(0);
   const transactions = await prisma.walletTransaction.findMany({
     where: { performedById: canteenUserId, createdAt: { gt: periodStart }, type: { in: [TransactionType.DEBIT, TransactionType.REFUND] } },
@@ -1113,7 +1129,10 @@ async function canteenDueByUser(canteenUserId: string, claims: Claims) {
     debit: asMoney(debit),
     refund: asMoney(refund),
     net: asMoney(Math.max(0, debit - refund)),
-    transactionCount: transactions.filter(transaction => transaction.type === TransactionType.DEBIT).length
+    transactionCount: transactions.filter(transaction => transaction.type === TransactionType.DEBIT).length,
+    settled: asMoney(settledAggregate._sum.amount),
+    settlementCount,
+    lastSettlementAt: lastSettlement?.createdAt ?? null
   };
 }
 
@@ -1129,7 +1148,11 @@ async function canteenDueByCanteen(canteenId: string, claims: Claims) {
   if (claims.role === Role.CANTEEN_OPERATOR && canteen.operatorId !== claims.sub) throw new Error('CANTEEN_SCOPE_DENIED');
   if (!scopedSchool(claims, canteen.schoolId)) throw new Error('SCHOOL_SCOPE_DENIED');
 
-  const lastSettlement = await prisma.canteenSettlement.findFirst({ where: { canteenId }, orderBy: { periodEnd: 'desc' } });
+  const [lastSettlement, settledAggregate, settlementCount] = await Promise.all([
+    prisma.canteenSettlement.findFirst({ where: { canteenId }, orderBy: { periodEnd: 'desc' } }),
+    prisma.canteenSettlement.aggregate({ where: { canteenId }, _sum: { amount: true } }),
+    prisma.canteenSettlement.count({ where: { canteenId } })
+  ]);
   const periodStart = lastSettlement?.periodEnd ?? new Date(0);
   const transactions = await prisma.walletTransaction.findMany({
     where: { canteenId, createdAt: { gt: periodStart }, type: { in: [TransactionType.DEBIT, TransactionType.REFUND] } },
@@ -1146,12 +1169,16 @@ async function canteenDueByCanteen(canteenId: string, claims: Claims) {
     debit: asMoney(debit),
     refund: asMoney(refund),
     net: asMoney(Math.max(0, debit - refund)),
-    transactionCount: transactions.filter(transaction => transaction.type === TransactionType.DEBIT).length
+    transactionCount: transactions.filter(transaction => transaction.type === TransactionType.DEBIT).length,
+    settled: asMoney(settledAggregate._sum.amount),
+    settlementCount,
+    lastSettlementAt: lastSettlement?.createdAt ?? null
   };
 }
 
 app.get('/api/v1/canteen/summary', auth, roles(Role.CANTEEN_OPERATOR), async (req, res, next) => {
   try {
+    await assertNotCanteenOwner(prisma, req.claims!);
     const canteenId = typeof req.query.canteenId === 'string' ? req.query.canteenId : undefined;
     const canteen = await resolveCanteenAccess(prisma, req.claims!, canteenId);
     const summary = canteen.canteenId ? await canteenDueByCanteen(canteen.canteenId, req.claims!) : await canteenDueByUser(req.claims!.sub, req.claims!);
@@ -1168,19 +1195,32 @@ app.get('/api/v1/canteen/owner-summary', auth, roles(Role.CANTEEN_OPERATOR), asy
     });
     const summaries = canteens.length
       ? await Promise.all(canteens.map(canteen => canteenDueByCanteen(canteen.id, req.claims!)))
-      : [await canteenDueByUser(req.claims!.sub, req.claims!)];
+      : [];
+    const settlements = await prisma.canteenSettlement.findMany({
+      where: { canteenUserId: req.claims!.sub },
+      include: {
+        canteen: { select: { name: true, canteenCode: true, school: { select: { name: true, schoolCode: true } } } },
+        school: { select: { name: true, schoolCode: true } },
+        settledBy: { select: { email: true } }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 25
+    });
     const totals = summaries.reduce((total, summary) => ({
       debit: total.debit + money(summary.debit),
       refund: total.refund + money(summary.refund),
       net: total.net + money(summary.net),
+      settled: total.settled + money(summary.settled),
       transactionCount: total.transactionCount + summary.transactionCount
-    }), { debit: 0, refund: 0, net: 0, transactionCount: 0 });
+    }), { debit: 0, refund: 0, net: 0, settled: 0, transactionCount: 0 });
     res.json({
       summaries,
+      settlements,
       totals: {
         debit: asMoney(totals.debit),
         refund: asMoney(totals.refund),
         net: asMoney(totals.net),
+        settled: asMoney(totals.settled),
         transactionCount: totals.transactionCount,
         canteenCount: canteens.length
       }
@@ -1256,7 +1296,7 @@ app.get('/api/v1/health', (_req, res) => res.json({ status: 'ok' }));
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
   const prismaCode = typeof error === 'object' && error !== null && 'code' in error ? (error as { code?: string }).code : undefined;
   const message = error instanceof z.ZodError ? 'VALIDATION_ERROR' : prismaCode === 'P2002' ? 'DUPLICATE_RECORD' : error instanceof Error ? error.message : 'INTERNAL_ERROR';
-  const status = message === 'FORBIDDEN' || message === 'ORIGIN_DENIED' ? 403 : message === 'LOGIN_LOCKED' ? 429 : ['INSUFFICIENT_BALANCE', 'STUDENT_INACTIVE', 'SCHOOL_SCOPE_DENIED', 'DAILY_LIMIT_EXCEEDED', 'REFUND_ONLY_DEBIT', 'CARD_REVOKED', 'CARD_NOT_ACTIVE', 'NO_UNSETTLED_AMOUNT', 'SCHOOL_HAS_ACTIVE_STUDENTS', 'SCHOOL_INACTIVE'].includes(message) ? 409 : message === 'DUPLICATE_RECORD' ? 409 : message === 'CARD_NOT_FOUND' ? 404 : 400;
+  const status = ['FORBIDDEN', 'ORIGIN_DENIED', 'OWNER_CASHIER_DENIED', 'CANTEEN_SCOPE_DENIED'].includes(message) ? 403 : message === 'LOGIN_LOCKED' ? 429 : ['INSUFFICIENT_BALANCE', 'STUDENT_INACTIVE', 'SCHOOL_SCOPE_DENIED', 'DAILY_LIMIT_EXCEEDED', 'REFUND_ONLY_DEBIT', 'CARD_REVOKED', 'CARD_NOT_ACTIVE', 'NO_UNSETTLED_AMOUNT', 'SCHOOL_HAS_ACTIVE_STUDENTS', 'SCHOOL_INACTIVE'].includes(message) ? 409 : message === 'DUPLICATE_RECORD' ? 409 : message === 'CARD_NOT_FOUND' ? 404 : 400;
   res.status(status).json({ error: message });
 });
 const port = Number(process.env.PORT ?? 4000);

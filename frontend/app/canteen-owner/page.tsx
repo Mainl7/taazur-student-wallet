@@ -16,6 +16,9 @@ type Summary = {
   debit: string;
   refund: string;
   net: string;
+  settled: string;
+  settlementCount: number;
+  lastSettlementAt: string | null;
   transactionCount: number;
   periodStart: string;
   periodEnd: string;
@@ -23,18 +26,33 @@ type Summary = {
 
 type OwnerSummary = {
   summaries?: Summary[];
+  settlements?: Settlement[];
   totals?: {
     debit: string;
     refund: string;
     net: string;
+    settled: string;
     transactionCount: number;
     canteenCount: number;
   };
   error?: string;
 };
 
+type Settlement = {
+  id: string;
+  amount: string;
+  transactionCount: number;
+  periodStart: string;
+  periodEnd: string;
+  createdAt: string;
+  canteen?: { name: string; canteenCode?: string | null; school?: { name: string; schoolCode: string } } | null;
+  school?: { name: string; schoolCode: string } | null;
+  settledBy: { email: string };
+};
+
 export default function CanteenOwnerPage() {
   const [summaries, setSummaries] = useState<Summary[]>([]);
+  const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [totals, setTotals] = useState<OwnerSummary['totals'] | null>(null);
   const [message, setMessage] = useState('جاري تحميل بيانات المقاصف...');
 
@@ -56,6 +74,7 @@ export default function CanteenOwnerPage() {
       }
 
       setSummaries(Array.isArray(data.summaries) ? data.summaries : []);
+      setSettlements(Array.isArray(data.settlements) ? data.settlements : []);
       setTotals(data.totals ?? null);
       setMessage('');
     };
@@ -70,16 +89,16 @@ export default function CanteenOwnerPage() {
           <BrandLogo compact />
           <div>
             <h1>واجهة مالك المقصف</h1>
-            <span>هنا تظهر كل المقاصف التابعة لك، وكل مقصف مربوط بمدرسته ومصاريفه الحالية</span>
+            <span>هنا تظهر بيانات المقاصف التابعة لك فقط: المصاريف الحالية والمبالغ التي تمت تسويتها</span>
           </div>
           <div className="owner-actions">
-            <a href="/canteen">فتح شاشة المحاسبة</a>
             <LogoutButton />
           </div>
         </header>
 
         <div className="cards owner-cards">
           <article><small>مستحقات المقاصف الحالية</small><b>{totals?.net ?? '0.00'} ر.س</b></article>
+          <article><small>مبالغ تمت تسويتها</small><b>{totals?.settled ?? '0.00'} ر.س</b></article>
           <article><small>إجمالي الخصومات</small><b>{totals?.debit ?? '0.00'} ر.س</b></article>
           <article><small>إجمالي الاسترجاع</small><b>{totals?.refund ?? '0.00'} ر.س</b></article>
           <article><small>عدد عمليات الخصم</small><b>{totals?.transactionCount ?? 0}</b></article>
@@ -97,8 +116,9 @@ export default function CanteenOwnerPage() {
               <th>الخصومات</th>
               <th>الاسترجاع</th>
               <th>عدد العمليات</th>
+              <th>تمت تسويته</th>
+              <th>عدد التسويات</th>
               <th>آخر تسوية</th>
-              <th>الإجراء</th>
             </tr>
           </thead>
           <tbody>
@@ -110,10 +130,41 @@ export default function CanteenOwnerPage() {
                 <td>{summary.debit} ر.س</td>
                 <td>{summary.refund} ر.س</td>
                 <td>{summary.transactionCount}</td>
-                <td>{new Date(summary.periodStart).getTime() === 0 ? 'لم تتم تسوية سابقة' : new Date(summary.periodStart).toLocaleDateString('ar-SA')}</td>
-                <td>{summary.canteen?.id ? <a className="table-link" href={`/canteen?canteenId=${summary.canteen.id}`}>فتح المحاسبة</a> : <a className="table-link" href="/canteen">فتح المحاسبة</a>}</td>
+                <td>{summary.settled} ر.س</td>
+                <td>{summary.settlementCount}</td>
+                <td>{summary.lastSettlementAt ? new Date(summary.lastSettlementAt).toLocaleDateString('ar-SA') : 'لم تتم تسوية سابقة'}</td>
               </tr>
             ))}
+            {!summaries.length && <tr><td colSpan={9}>لا توجد مقاصف مربوطة بهذا الحساب حتى الآن. اطلب من المدير ربط المقاصف التابعة لك.</td></tr>}
+          </tbody>
+        </table>
+
+        <h2>آخر التسويات</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>تاريخ التسوية</th>
+              <th>المقصف</th>
+              <th>المدرسة</th>
+              <th>الفترة</th>
+              <th>عدد العمليات</th>
+              <th>المبلغ المسدد</th>
+              <th>سجلها</th>
+            </tr>
+          </thead>
+          <tbody>
+            {settlements.map(settlement => (
+              <tr key={settlement.id}>
+                <td>{new Date(settlement.createdAt).toLocaleString('ar-SA')}</td>
+                <td>{settlement.canteen?.name ?? 'مقصف عام'}</td>
+                <td>{settlement.canteen?.school?.name ?? settlement.school?.name ?? '—'}</td>
+                <td>{new Date(settlement.periodStart).toLocaleDateString('ar-SA')} - {new Date(settlement.periodEnd).toLocaleDateString('ar-SA')}</td>
+                <td>{settlement.transactionCount}</td>
+                <td>{settlement.amount} ر.س</td>
+                <td>{settlement.settledBy.email}</td>
+              </tr>
+            ))}
+            {!settlements.length && <tr><td colSpan={7}>لا توجد تسويات مسجلة حتى الآن.</td></tr>}
           </tbody>
         </table>
       </section>

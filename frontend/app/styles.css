@@ -114,7 +114,7 @@ dl{display:grid;gap:8px;margin:0}dt{color:var(--muted);font-weight:800}dd{margin
 .owner-header h1{font-size:28px}
 .owner-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .owner-actions a{display:inline-flex;align-items:center;justify-content:center;background:#edf6f1;color:var(--green);padding:10px 14px;border:1px solid #d5e9df;border-radius:12px;text-decoration:none;font-weight:800}
-.owner-cards{grid-template-columns:repeat(4,minmax(160px,1fr))}
+.owner-cards{grid-template-columns:repeat(5,minmax(150px,1fr))}
 .dashboard-hero{align-items:flex-start}
 .dashboard-hero strong{display:block;margin-bottom:6px}
 .dashboard-filters{display:flex;gap:12px;flex-wrap:wrap;align-items:end}

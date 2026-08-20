@@ -78,6 +78,10 @@ export default function Canteen() {
     if (!response.ok) return void loadSummary();
     const data: { canteens?: Canteen[] } = await response.json();
     const nextCanteens = Array.isArray(data.canteens) ? data.canteens : [];
+    if (nextCanteens.length > 0) {
+      location.assign('/canteen-owner');
+      return;
+    }
     const requestedCanteenId = new URLSearchParams(location.search).get('canteenId') ?? '';
     const requestedCanteen = nextCanteens.some(canteen => canteen.id === requestedCanteenId) ? requestedCanteenId : '';
     setCanteens(nextCanteens);
