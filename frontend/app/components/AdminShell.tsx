@@ -12,8 +12,8 @@ export default function AdminShell({ children }: { children: ReactNode }) {
     const checkAccess = async () => {
       const response = await apiFetch('/auth/me');
       if (response.status === 401) return location.assign('/login');
-      const data: { user?: { role: string } } = await response.json();
-      if (data.user?.role === 'CANTEEN_OPERATOR') return location.assign('/canteen-owner');
+      const data: { user?: { role: string; schoolId?: string | null } } = await response.json();
+      if (data.user?.role === 'CANTEEN_OPERATOR') return location.assign(data.user.schoolId ? '/canteen' : '/canteen-owner');
       setAllowed(true);
     };
 

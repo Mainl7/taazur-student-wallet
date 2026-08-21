@@ -60,9 +60,13 @@ export default function CanteenOwnerPage() {
     const load = async () => {
       const me = await apiFetch('/auth/me');
       if (me.status === 401) return location.assign('/login');
-      const meData: { user?: { role: string } } = await me.json();
+      const meData: { user?: { role: string; schoolId?: string | null } } = await me.json();
       if (meData.user?.role !== 'CANTEEN_OPERATOR') {
         location.assign('/');
+        return;
+      }
+      if (meData.user.schoolId) {
+        location.assign('/canteen');
         return;
       }
 
