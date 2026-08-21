@@ -59,6 +59,7 @@ const money = (value: unknown) => Number(value ?? 0);
 const asMoney = (value: unknown) => money(value).toFixed(2);
 const csvCell = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`;
 const maskToken = (token: string) => token.length > 16 ? `${token.slice(0, 12)}…${token.slice(-4)}` : token;
+const alertPriority = { danger: 3, warn: 2, info: 1 } as const;
 const startOfToday = () => {
   const date = new Date();
   date.setHours(0, 0, 0, 0);
@@ -694,7 +695,7 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
       prisma.walletTransaction.aggregate({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: month } }, _sum: { amount: true } }),
       prisma.walletTransaction.aggregate({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: periodStart } }, _sum: { amount: true } }),
       prisma.card.count({ where: { status: 'REVOKED', ...(schoolId ? { student: { schoolId } } : {}) } }),
-      prisma.wallet.findMany({ where: { balance: { lt: 10 }, student: { ...studentWhere, status: EntityStatus.ACTIVE } }, include: { student: { select: { fullName: true, studentCode: true, school: { select: { name: true } } } } }, take: 5, orderBy: { balance: 'asc' } }),
+      prisma.wallet.findMany({ where: { balance: { lt: 10 }, student: { ...studentWhere, status: EntityStatus.ACTIVE } }, include: { student: { select: { id: true, fullName: true, studentCode: true, school: { select: { name: true } } } } }, take: 5, orderBy: { balance: 'asc' } }),
       prisma.wallet.count({ where: { balance: { lt: 10 }, student: { ...studentWhere, status: EntityStatus.ACTIVE } } }),
       prisma.student.findMany({ where: { ...studentWhere, status: EntityStatus.ACTIVE }, select: { id: true, fullName: true, studentCode: true, dailyLimit: true, school: { select: { name: true } } } }),
       prisma.walletTransaction.findMany({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: today } }, select: { studentId: true, amount: true } }),
@@ -720,6 +721,53 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
     const dailyLimitReached = [...dailyLimitMap.values()].filter(item => Math.max(0, item.debit - item.refund) >= money(item.student.dailyLimit));
     const repeatedRefunds = refundGroups.filter(group => group._count.id >= 3).length;
     const alertsCount = lowWalletCount + dailyLimitReached.length + revokedAttempts + failedLogins + repeatedRefunds;
+    const actionItems = [
+      ...lowWallets.map(wallet => ({
+        id: `LOW_BALANCE_${wallet.student.id}`,
+        type: 'LOW_BALANCE',
+        severity: 'warn' as const,
+        title: 'رصيد طالب منخفض',
+        description: `${wallet.student.fullName} في ${wallet.student.school.name} رصيده ${asMoney(wallet.balance)} ر.س`,
+        metric: `${asMoney(wallet.balance)} ر.س`,
+        href: `/students/${wallet.student.id}`
+      })),
+      ...dailyLimitReached.slice(0, 5).map(item => ({
+        id: `DAILY_LIMIT_${item.student.id}`,
+        type: 'DAILY_LIMIT_REACHED',
+        severity: 'danger' as const,
+        title: 'طالب وصل الحد اليومي',
+        description: `${item.student.fullName} صرف ${asMoney(Math.max(0, item.debit - item.refund))} من حد ${asMoney(item.student.dailyLimit)} ر.س`,
+        metric: `${asMoney(Math.max(0, item.debit - item.refund))}/${asMoney(item.student.dailyLimit)}`,
+        href: `/students/${item.student.id}`
+      })),
+      ...(revokedAttempts ? [{
+        id: 'REVOKED_CARD_ATTEMPTS',
+        type: 'REVOKED_CARD_ATTEMPTS',
+        severity: 'danger' as const,
+        title: 'محاولات استخدام بطاقة ملغاة',
+        description: `${revokedAttempts} محاولة خلال آخر 7 أيام`,
+        metric: revokedAttempts,
+        href: '/alerts'
+      }] : []),
+      ...(failedLogins ? [{
+        id: 'FAILED_LOGINS',
+        type: 'FAILED_LOGINS',
+        severity: 'warn' as const,
+        title: 'محاولات دخول فاشلة كثيرة',
+        description: `${failedLogins} حساب/بريد عليه محاولات فاشلة متكررة`,
+        metric: failedLogins,
+        href: '/alerts'
+      }] : []),
+      ...(repeatedRefunds ? [{
+        id: 'REPEATED_REFUNDS',
+        type: 'REPEATED_REFUNDS',
+        severity: 'warn' as const,
+        title: 'استرجاعات متكررة',
+        description: `${repeatedRefunds} كاشير/مدرسة لديهم 3 استرجاعات أو أكثر خلال آخر 7 أيام`,
+        metric: repeatedRefunds,
+        href: '/alerts'
+      }] : [])
+    ].sort((a, b) => alertPriority[b.severity] - alertPriority[a.severity]);
 
     const spendingByDay = last7Days.map(date => ({ date, amount: 0, count: 0 }));
     const dayMap = new Map(spendingByDay.map(item => [item.date, item]));
@@ -767,11 +815,12 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
         return { schoolId: group.schoolId, schoolName: school?.name ?? group.schoolId, schoolCode: school?.schoolCode ?? '—', count: group._count.id, amount: asMoney(group._sum.amount) };
       }),
       quickAlerts: {
-        lowBalances: lowWallets.map(wallet => ({ studentName: wallet.student.fullName, studentCode: wallet.student.studentCode, schoolName: wallet.student.school.name, balance: asMoney(wallet.balance) })),
-        dailyLimitReached: dailyLimitReached.slice(0, 5).map(item => ({ studentName: item.student.fullName, studentCode: item.student.studentCode, schoolName: item.student.school.name, spentToday: asMoney(Math.max(0, item.debit - item.refund)), dailyLimit: asMoney(item.student.dailyLimit) })),
+        lowBalances: lowWallets.map(wallet => ({ studentId: wallet.student.id, studentName: wallet.student.fullName, studentCode: wallet.student.studentCode, schoolName: wallet.student.school.name, balance: asMoney(wallet.balance) })),
+        dailyLimitReached: dailyLimitReached.slice(0, 5).map(item => ({ studentId: item.student.id, studentName: item.student.fullName, studentCode: item.student.studentCode, schoolName: item.student.school.name, spentToday: asMoney(Math.max(0, item.debit - item.refund)), dailyLimit: asMoney(item.student.dailyLimit) })),
         failedLogins,
         repeatedRefunds,
-        revokedAttempts
+        revokedAttempts,
+        actionItems
       },
       canteen: { unsettledTotal: asMoney(canteenUnsettledTotal), canteensWithDue }
     });
@@ -939,7 +988,7 @@ app.get('/api/v1/alerts', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, 
     const today = startOfToday();
     const recent = daysAgo(7);
     const [lowWallets, students, todayDebits, todayRefunds, revokedAttempts, loginAttempts, refundGroups] = await Promise.all([
-      prisma.wallet.findMany({ where: { balance: { lt: 10 }, student: schoolWhere }, include: { student: { select: { fullName: true, studentCode: true, dailyLimit: true, school: { select: { name: true } } } } }, take: 100, orderBy: { balance: 'asc' } }),
+      prisma.wallet.findMany({ where: { balance: { lt: 10 }, student: schoolWhere }, include: { student: { select: { id: true, fullName: true, studentCode: true, dailyLimit: true, school: { select: { name: true } } } } }, take: 100, orderBy: { balance: 'asc' } }),
       prisma.student.findMany({ where: { ...schoolWhere, status: EntityStatus.ACTIVE }, select: { id: true, fullName: true, studentCode: true, dailyLimit: true, school: { select: { name: true } } } }),
       prisma.walletTransaction.findMany({ where: { ...(schoolId ? { schoolId } : {}), type: TransactionType.DEBIT, createdAt: { gte: today } }, select: { id: true, studentId: true, amount: true } }),
       prisma.walletTransaction.findMany({ where: { ...(schoolId ? { schoolId } : {}), type: TransactionType.REFUND, createdAt: { gte: today } }, select: { reference: true, studentId: true, amount: true } }),
@@ -969,13 +1018,84 @@ app.get('/api/v1/alerts', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, 
     ]);
     const refundUserMap = new Map(refundUsers.map(user => [user.id, user.email]));
     const refundSchoolMap = new Map(refundSchools.map(school => [school.id, school.name]));
+    const lowBalances = lowWallets.map(wallet => ({ studentId: wallet.student.id, studentName: wallet.student.fullName, studentCode: wallet.student.studentCode, schoolName: wallet.student.school.name, balance: asMoney(wallet.balance) }));
+    const dailyLimitReached = [...debitByStudent.entries()]
+      .map(([studentId, totals]) => ({ student: studentMap.get(studentId), net: Math.max(0, totals.debit - totals.refund) }))
+      .filter(item => item.student && item.net >= money(item.student.dailyLimit))
+      .map(item => ({ studentId: item.student!.id, studentName: item.student!.fullName, studentCode: item.student!.studentCode, schoolName: item.student!.school.name, dailyLimit: asMoney(item.student!.dailyLimit), spentToday: asMoney(item.net) }));
+    const revokedCardAttempts = revokedAttempts.map(log => ({ at: log.timestamp, schoolName: log.school?.name ?? '—', userEmail: log.user?.email ?? '—', token: typeof log.newValue === 'object' && log.newValue && 'cardToken' in log.newValue ? String(log.newValue.cardToken) : '—' }));
+    const failedLoginAlerts = loginAttempts.map(attempt => ({ email: attempt.email, failedCount: attempt.failedCount, lockedUntil: attempt.lockedUntil, lastAttemptAt: attempt.lastAttemptAt }));
+    const repeatedRefunds = refundGroups.filter(group => group._count.id >= 3).map(group => ({ userEmail: refundUserMap.get(group.performedById) ?? group.performedById, schoolName: refundSchoolMap.get(group.schoolId) ?? group.schoolId, count: group._count.id, amount: asMoney(group._sum.amount) }));
+    const items = [
+      ...dailyLimitReached.map(item => ({
+        id: `DAILY_LIMIT_${item.studentId}`,
+        type: 'DAILY_LIMIT_REACHED',
+        severity: 'danger' as const,
+        title: 'طالب وصل الحد اليومي',
+        description: `${item.studentName} — ${item.schoolName} — صرف ${item.spentToday} من حد ${item.dailyLimit} ر.س`,
+        metric: `${item.spentToday}/${item.dailyLimit}`,
+        href: `/students/${item.studentId}`,
+        createdAt: today
+      })),
+      ...revokedCardAttempts.map(item => ({
+        id: `REVOKED_${item.at}_${item.token}`,
+        type: 'REVOKED_CARD_ATTEMPT',
+        severity: 'danger' as const,
+        title: 'بطاقة ملغاة تم استخدامها',
+        description: `${new Date(item.at).toLocaleString('ar-SA')} — ${item.schoolName} — ${item.userEmail} — ${item.token}`,
+        metric: 'بطاقة ملغاة',
+        href: '/audit-logs',
+        createdAt: item.at
+      })),
+      ...lowBalances.map(item => ({
+        id: `LOW_BALANCE_${item.studentId}`,
+        type: 'LOW_BALANCE',
+        severity: 'warn' as const,
+        title: 'رصيد أقل من 10 ريال',
+        description: `${item.studentName} — ${item.schoolName} — الرصيد ${item.balance} ر.س`,
+        metric: `${item.balance} ر.س`,
+        href: `/students/${item.studentId}`,
+        createdAt: today
+      })),
+      ...failedLoginAlerts.map(item => ({
+        id: `FAILED_LOGIN_${item.email}`,
+        type: 'FAILED_LOGINS',
+        severity: item.lockedUntil ? 'danger' as const : 'warn' as const,
+        title: item.lockedUntil ? 'حساب مقفل مؤقتًا' : 'محاولات دخول فاشلة',
+        description: `${item.email}: ${item.failedCount} محاولات${item.lockedUntil ? ` — مقفل حتى ${new Date(item.lockedUntil).toLocaleString('ar-SA')}` : ''}`,
+        metric: item.failedCount,
+        href: '/audit-logs',
+        createdAt: item.lastAttemptAt
+      })),
+      ...repeatedRefunds.map(item => ({
+        id: `REPEATED_REFUNDS_${item.userEmail}_${item.schoolName}`,
+        type: 'REPEATED_REFUNDS',
+        severity: 'warn' as const,
+        title: 'استرجاعات متكررة',
+        description: `${item.userEmail} — ${item.schoolName}: ${item.count} استرجاعات / ${item.amount} ر.س`,
+        metric: item.count,
+        href: '/transactions',
+        createdAt: recent
+      }))
+    ].sort((a, b) => alertPriority[b.severity] - alertPriority[a.severity] || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     res.json({
-      lowBalances: lowWallets.map(wallet => ({ studentName: wallet.student.fullName, studentCode: wallet.student.studentCode, schoolName: wallet.student.school.name, balance: asMoney(wallet.balance) })),
-      dailyLimitReached: [...debitByStudent.entries()].map(([studentId, totals]) => ({ student: studentMap.get(studentId), net: Math.max(0, totals.debit - totals.refund) })).filter(item => item.student && item.net >= money(item.student.dailyLimit)).map(item => ({ studentName: item.student!.fullName, studentCode: item.student!.studentCode, schoolName: item.student!.school.name, dailyLimit: asMoney(item.student!.dailyLimit), spentToday: asMoney(item.net) })),
-      revokedCardAttempts: revokedAttempts.map(log => ({ at: log.timestamp, schoolName: log.school?.name ?? '—', userEmail: log.user?.email ?? '—', token: typeof log.newValue === 'object' && log.newValue && 'cardToken' in log.newValue ? String(log.newValue.cardToken) : '—' })),
-      failedLogins: loginAttempts.map(attempt => ({ email: attempt.email, failedCount: attempt.failedCount, lockedUntil: attempt.lockedUntil, lastAttemptAt: attempt.lastAttemptAt })),
-      repeatedRefunds: refundGroups.filter(group => group._count.id >= 3).map(group => ({ userEmail: refundUserMap.get(group.performedById) ?? group.performedById, schoolName: refundSchoolMap.get(group.schoolId) ?? group.schoolId, count: group._count.id, amount: asMoney(group._sum.amount) }))
+      summary: {
+        total: items.length,
+        danger: items.filter(item => item.severity === 'danger').length,
+        warn: items.filter(item => item.severity === 'warn').length,
+        lowBalances: lowBalances.length,
+        dailyLimitReached: dailyLimitReached.length,
+        revokedCardAttempts: revokedCardAttempts.length,
+        failedLogins: failedLoginAlerts.length,
+        repeatedRefunds: repeatedRefunds.length
+      },
+      items,
+      lowBalances,
+      dailyLimitReached,
+      revokedCardAttempts,
+      failedLogins: failedLoginAlerts,
+      repeatedRefunds
     });
   } catch (error) { next(error); }
 });

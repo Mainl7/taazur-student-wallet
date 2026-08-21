@@ -9,6 +9,7 @@ type School = { id: string; name: string; schoolCode: string };
 type DaySpend = { date: string; amount: string; count: number; percentage: number };
 type RankedStudent = { studentId: string; fullName: string; studentCode: string; schoolName: string; count: number; amount: string };
 type RankedSchool = { schoolId: string; schoolName: string; schoolCode: string; count: number; amount: string };
+type AlertAction = { id: string; type: string; severity: 'danger' | 'warn' | 'info'; title: string; description: string; metric: string | number; href: string };
 type Dashboard = {
   schools: number;
   students: number;
@@ -25,11 +26,12 @@ type Dashboard = {
   topStudents: RankedStudent[];
   topSchools: RankedSchool[];
   quickAlerts: {
-    lowBalances: { studentName: string; studentCode: string; schoolName: string; balance: string }[];
-    dailyLimitReached: { studentName: string; studentCode: string; schoolName: string; spentToday: string; dailyLimit: string }[];
+    lowBalances: { studentId?: string; studentName: string; studentCode: string; schoolName: string; balance: string }[];
+    dailyLimitReached: { studentId?: string; studentName: string; studentCode: string; schoolName: string; spentToday: string; dailyLimit: string }[];
     failedLogins: number;
     repeatedRefunds: number;
     revokedAttempts: number;
+    actionItems?: AlertAction[];
   };
   canteen: { unsettledTotal: string; canteensWithDue: number };
 };
@@ -156,11 +158,20 @@ export default function DashboardPage() {
               <h2>تنبيهات تحتاج إجراء</h2>
               <a href="/alerts">عرض كل التنبيهات ←</a>
             </div>
-            {data?.quickAlerts.lowBalances.slice(0, 3).map(item => <p key={`${item.studentCode}-${item.schoolName}`}>رصيد منخفض: {item.studentName} — {item.balance} ر.س</p>)}
-            {data?.quickAlerts.dailyLimitReached.slice(0, 3).map(item => <p key={`${item.studentCode}-${item.schoolName}`}>وصل الحد اليومي: {item.studentName} — {item.spentToday}/{item.dailyLimit} ر.س</p>)}
-            {!!data?.quickAlerts.failedLogins && <p>محاولات دخول فاشلة كثيرة: {data.quickAlerts.failedLogins}</p>}
-            {!!data?.quickAlerts.repeatedRefunds && <p>استرجاعات متكررة: {data.quickAlerts.repeatedRefunds}</p>}
-            {!!data?.quickAlerts.revokedAttempts && <p>محاولات بطاقة ملغاة: {data.quickAlerts.revokedAttempts}</p>}
+            {data?.quickAlerts.actionItems?.slice(0, 6).map(item => (
+              <a className={`alert-action ${item.severity}`} href={item.href} key={item.id}>
+                <span>
+                  <strong>{item.title}</strong>
+                  <small>{item.description}</small>
+                </span>
+                <b>{item.metric}</b>
+              </a>
+            ))}
+            {!data?.quickAlerts.actionItems?.length && data?.quickAlerts.lowBalances.slice(0, 3).map(item => <p key={`${item.studentCode}-${item.schoolName}`}>رصيد منخفض: {item.studentName} — {item.balance} ر.س</p>)}
+            {!data?.quickAlerts.actionItems?.length && data?.quickAlerts.dailyLimitReached.slice(0, 3).map(item => <p key={`${item.studentCode}-${item.schoolName}`}>وصل الحد اليومي: {item.studentName} — {item.spentToday}/{item.dailyLimit} ر.س</p>)}
+            {!data?.quickAlerts.actionItems?.length && !!data?.quickAlerts.failedLogins && <p>محاولات دخول فاشلة كثيرة: {data.quickAlerts.failedLogins}</p>}
+            {!data?.quickAlerts.actionItems?.length && !!data?.quickAlerts.repeatedRefunds && <p>استرجاعات متكررة: {data.quickAlerts.repeatedRefunds}</p>}
+            {!data?.quickAlerts.actionItems?.length && !!data?.quickAlerts.revokedAttempts && <p>محاولات بطاقة ملغاة: {data.quickAlerts.revokedAttempts}</p>}
             {data && data.alertsCount === 0 && <p className="empty-state">لا توجد تنبيهات حاليًا.</p>}
           </article>
 
