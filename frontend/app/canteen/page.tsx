@@ -7,7 +7,7 @@ import BrandLogo from '../components/BrandLogo';
 import LogoutButton from '../components/LogoutButton';
 import { apiFetch } from '../lib/api';
 
-type MeResponse = { user?: { role: string }; error?: string };
+type MeResponse = { user?: { role: string; schoolId?: string | null }; error?: string };
 type Notice = { text: string; tone: 'success' | 'error' | 'info' };
 type LookupStudent = { id: string; fullName: string; studentCode: string; grade: string; schoolName: string; balance: string; dailyLimit: string; todaySpent: string; todayRemaining: string };
 type Canteen = { id: string; name: string; canteenCode?: string | null; school: { name: string; schoolCode: string } };
@@ -41,7 +41,7 @@ export default function Canteen() {
       const response = await apiFetch('/auth/me');
       if (response.status === 401) return location.assign('/login');
       const data: MeResponse = await response.json();
-      if (data.user?.role !== 'CANTEEN_OPERATOR') {
+      if (!['CANTEEN_CASHIER', 'CANTEEN_OPERATOR'].includes(data.user?.role ?? '') || !data.user?.schoolId) {
         setNotice({ tone: 'error', text: 'هذه الصفحة مخصصة لموظف المقصف فقط. استخدم لوحة الإدارة من حساب المدير.' });
         return;
       }
@@ -78,10 +78,6 @@ export default function Canteen() {
     if (!response.ok) return void loadSummary();
     const data: { canteens?: Canteen[] } = await response.json();
     const nextCanteens = Array.isArray(data.canteens) ? data.canteens : [];
-    if (nextCanteens.length > 0) {
-      location.assign('/canteen-owner');
-      return;
-    }
     const requestedCanteenId = new URLSearchParams(location.search).get('canteenId') ?? '';
     const requestedCanteen = nextCanteens.some(canteen => canteen.id === requestedCanteenId) ? requestedCanteenId : '';
     setCanteens(nextCanteens);

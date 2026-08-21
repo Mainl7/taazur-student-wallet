@@ -13,7 +13,8 @@ export default function AdminShell({ children }: { children: ReactNode }) {
       const response = await apiFetch('/auth/me');
       if (response.status === 401) return location.assign('/login');
       const data: { user?: { role: string; schoolId?: string | null } } = await response.json();
-      if (data.user?.role === 'CANTEEN_OPERATOR') return location.assign(data.user.schoolId ? '/canteen' : '/canteen-owner');
+      if (['CANTEEN_CASHIER', 'CANTEEN_OPERATOR'].includes(data.user?.role ?? '') && data.user?.schoolId) return location.assign('/canteen');
+      if (['CANTEEN_OWNER', 'CANTEEN_OPERATOR'].includes(data.user?.role ?? '')) return location.assign('/canteen-owner');
       setAllowed(true);
     };
 

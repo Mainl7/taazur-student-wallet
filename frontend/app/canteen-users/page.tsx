@@ -9,6 +9,7 @@ type Canteen = { id: string; name: string; canteenCode?: string | null; status: 
 type CanteenUser = {
   id: string;
   email: string;
+  role: string;
   createdAt: string;
   school: { name: string; schoolCode: string } | null;
   operatedCanteens: Canteen[];
@@ -22,8 +23,8 @@ export default function CanteenUsers() {
   const [message, setMessage] = useState('');
 
   const activeSchools = useMemo(() => schools.filter(school => school.status === 'ACTIVE'), [schools]);
-  const cashierUsers = useMemo(() => users.filter(user => !!user.school), [users]);
-  const ownerUsers = useMemo(() => users.filter(user => !user.school), [users]);
+  const cashierUsers = useMemo(() => users.filter(user => user.role === 'CANTEEN_CASHIER' || (user.role === 'CANTEEN_OPERATOR' && !!user.school)), [users]);
+  const ownerUsers = useMemo(() => users.filter(user => user.role === 'CANTEEN_OWNER' || (user.role === 'CANTEEN_OPERATOR' && !user.school)), [users]);
 
   const load = async () => {
     const [schoolResponse, userResponse, canteenResponse] = await Promise.all([apiFetch('/schools'), apiFetch('/canteen-users'), apiFetch('/canteens')]);
@@ -196,7 +197,7 @@ export default function CanteenUsers() {
       <h2>المقاصف المسجلة</h2>
       <table>
         <thead><tr><th>المقصف</th><th>الرمز</th><th>المدرسة</th><th>مالك المقصف</th><th>الحالة</th></tr></thead>
-        <tbody>{canteens.map(canteen => <tr key={canteen.id}><td>{canteen.name}</td><td>{canteen.canteenCode ?? '—'}</td><td>{canteen.school.name}<br /><small>{canteen.school.schoolCode}</small></td><td>{canteen.operator.email}</td><td>{canteen.status}</td></tr>)}</tbody>
+        <tbody>{canteens.map(canteen => <tr key={canteen.id}><td><a className="table-link" href={`/canteens/${canteen.id}`}>{canteen.name}</a></td><td>{canteen.canteenCode ?? '—'}</td><td>{canteen.school.name}<br /><small>{canteen.school.schoolCode}</small></td><td>{canteen.operator.email}</td><td>{canteen.status}</td></tr>)}</tbody>
       </table>
 
       <h2>حسابات ملاك المقاصف</h2>

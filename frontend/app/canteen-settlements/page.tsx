@@ -70,6 +70,7 @@ export default function CanteenSettlementsPage() {
             {summary.canteen && <p>المشغّل: {summary.canteenUser.email}</p>}
             <b>{summary.net} ر.س</b>
             <p>خصومات: {summary.debit} ر.س — استرجاع: {summary.refund} ر.س — عدد الخصومات: {summary.transactionCount}</p>
+            {summary.canteen && <a className="table-link" href={`/canteens/${summary.canteen.id}`}>تفاصيل المقصف</a>}
             <button onClick={() => void settle(summary)} disabled={Number(summary.net) <= 0}>تم سداد المقصف</button>
           </article>
         ))}

@@ -92,29 +92,18 @@ function scopedSchoolFromQuery(req: Request) {
 }
 
 async function resolveCanteenAccess(client: PrismaClient | Prisma.TransactionClient, claims: Claims, canteenId?: string | null): Promise<CanteenAccess> {
-  if (claims.role !== Role.CANTEEN_OPERATOR) throw new Error('FORBIDDEN');
-
+  if (claims.role !== Role.CANTEEN_CASHIER && claims.role !== Role.CANTEEN_OPERATOR) throw new Error('FORBIDDEN');
+  if (!claims.schoolId) throw new Error('SCHOOL_SCOPE_DENIED');
   if (canteenId) {
-    const canteen = await client.canteen.findUnique({ where: { id: canteenId }, select: { id: true, name: true, schoolId: true, operatorId: true, status: true } });
-    if (!canteen || canteen.status !== EntityStatus.ACTIVE || canteen.operatorId !== claims.sub) throw new Error('CANTEEN_SCOPE_DENIED');
-    if (claims.schoolId && claims.schoolId !== canteen.schoolId) throw new Error('SCHOOL_SCOPE_DENIED');
+    const canteen = await client.canteen.findUnique({ where: { id: canteenId }, select: { id: true, name: true, schoolId: true, status: true } });
+    if (!canteen || canteen.status !== EntityStatus.ACTIVE || canteen.schoolId !== claims.schoolId) throw new Error('CANTEEN_SCOPE_DENIED');
     return { canteenId: canteen.id, schoolId: canteen.schoolId, name: canteen.name };
   }
-
-  const canteens = await client.canteen.findMany({
-    where: { operatorId: claims.sub, status: EntityStatus.ACTIVE, ...(claims.schoolId ? { schoolId: claims.schoolId } : {}) },
-    select: { id: true, name: true, schoolId: true },
-    orderBy: { name: 'asc' },
-    take: 2
-  });
-
-  if (canteens.length === 1) return { canteenId: canteens[0].id, schoolId: canteens[0].schoolId, name: canteens[0].name };
-  if (canteens.length > 1) throw new Error('CANTEEN_REQUIRED');
-  if (claims.schoolId) return { canteenId: null, schoolId: claims.schoolId, name: 'المقصف' };
-  throw new Error('CANTEEN_REQUIRED');
+  return { canteenId: null, schoolId: claims.schoolId, name: 'المقصف' };
 }
 
 async function assertNotCanteenOwner(client: PrismaClient | Prisma.TransactionClient, claims: Claims) {
+  if (claims.role === Role.CANTEEN_OWNER) throw new Error('OWNER_CASHIER_DENIED');
   if (claims.role !== Role.CANTEEN_OPERATOR) return;
   if (!claims.schoolId) throw new Error('OWNER_CASHIER_DENIED');
   const ownedCanteens = await client.canteen.count({
@@ -297,7 +286,7 @@ const canteenPasswordResetSchema = z.object({ password: z.string().min(12).max(1
 app.get('/api/v1/canteen-users', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
   try {
     const where: Prisma.UserWhereInput = {
-      role: Role.CANTEEN_OPERATOR,
+      role: { in: [Role.CANTEEN_OPERATOR, Role.CANTEEN_CASHIER, Role.CANTEEN_OWNER] },
       status: EntityStatus.ACTIVE,
       ...(req.claims!.schoolId ? { OR: [{ schoolId: req.claims!.schoolId }, { operatedCanteens: { some: { schoolId: req.claims!.schoolId } } }] } : {})
     };
@@ -312,7 +301,7 @@ app.post('/api/v1/canteen-users', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION
     if (schoolId && !scopedSchool(req.claims!, schoolId)) return res.status(403).json({ error: 'SCHOOL_SCOPE_DENIED' });
     const passwordHash = await argon2.hash(input.password);
     const user = await prisma.$transaction(async tx => {
-      const created = await tx.user.create({ data: { email: input.email.toLowerCase(), passwordHash, role: Role.CANTEEN_OPERATOR, schoolId }, select: { id: true, email: true, role: true, schoolId: true, school: { select: { name: true, schoolCode: true } }, createdAt: true } });
+      const created = await tx.user.create({ data: { email: input.email.toLowerCase(), passwordHash, role: schoolId ? Role.CANTEEN_CASHIER : Role.CANTEEN_OWNER, schoolId }, select: { id: true, email: true, role: true, schoolId: true, school: { select: { name: true, schoolCode: true } }, createdAt: true } });
       await audit(tx, req, { action: 'CANTEEN_USER_CREATED', entity: 'User', entityId: created.id, schoolId, newValue: { email: created.email, schoolId: created.schoolId } });
       return created;
     });
@@ -336,7 +325,7 @@ app.patch('/api/v1/canteen-users/:userId/password', auth, roles(Role.SUPER_ADMIN
       }
     });
 
-    if (user.role !== Role.CANTEEN_OPERATOR || user.status !== EntityStatus.ACTIVE) return res.status(400).json({ error: 'INVALID_CANTEEN_OPERATOR' });
+    if (!((user.role === Role.CANTEEN_OPERATOR || user.role === Role.CANTEEN_CASHIER || user.role === Role.CANTEEN_OWNER) && user.status === EntityStatus.ACTIVE)) return res.status(400).json({ error: 'INVALID_CANTEEN_OPERATOR' });
     const visibleSchoolIds = [user.schoolId, ...user.operatedCanteens.map(canteen => canteen.schoolId)].filter(Boolean) as string[];
     if (req.claims!.schoolId && !visibleSchoolIds.includes(req.claims!.schoolId)) return res.status(403).json({ error: 'SCHOOL_SCOPE_DENIED' });
 
@@ -363,10 +352,12 @@ app.patch('/api/v1/canteen-users/:userId/password', auth, roles(Role.SUPER_ADMIN
 });
 
 const canteenSchema = z.object({ name: z.string().trim().min(2).max(120), canteenCode: z.string().trim().min(2).max(64).optional(), schoolId: z.string().cuid(), operatorId: z.string().cuid() });
-app.get('/api/v1/canteens', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR, Role.CANTEEN_OPERATOR), async (req, res, next) => {
+app.get('/api/v1/canteens', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR, Role.CANTEEN_OPERATOR, Role.CANTEEN_CASHIER, Role.CANTEEN_OWNER), async (req, res, next) => {
   try {
-    const where = req.claims!.role === Role.CANTEEN_OPERATOR
+    const where = req.claims!.role === Role.CANTEEN_OWNER || (req.claims!.role === Role.CANTEEN_OPERATOR && !req.claims!.schoolId)
       ? { operatorId: req.claims!.sub, status: EntityStatus.ACTIVE, ...(req.claims!.schoolId ? { schoolId: req.claims!.schoolId } : {}) }
+      : req.claims!.role === Role.CANTEEN_CASHIER || (req.claims!.role === Role.CANTEEN_OPERATOR && req.claims!.schoolId)
+      ? { id: '__cashier_has_no_owned_canteens__' }
       : { ...(req.claims!.schoolId ? { schoolId: req.claims!.schoolId } : {}) };
     const canteens = await prisma.canteen.findMany({
       where,
@@ -377,13 +368,38 @@ app.get('/api/v1/canteens', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN
   } catch (error) { next(error); }
 });
 
+app.get('/api/v1/canteens/:canteenId/details', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR, Role.CANTEEN_OWNER, Role.CANTEEN_OPERATOR), async (req, res, next) => {
+  try {
+    const canteenId = routeParam(req.params.canteenId);
+    const summary = await canteenDueByCanteen(canteenId, req.claims!);
+    const [transactions, settlements] = await Promise.all([
+      prisma.walletTransaction.findMany({
+        where: { canteenId },
+        include: { school: { select: { name: true, schoolCode: true } }, performedBy: { select: { email: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 100
+      }),
+      prisma.canteenSettlement.findMany({
+        where: { canteenId },
+        include: { settledBy: { select: { email: true } }, school: { select: { name: true, schoolCode: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 50
+      })
+    ]);
+    const studentIds = [...new Set(transactions.map(transaction => transaction.studentId))];
+    const students = await prisma.student.findMany({ where: { id: { in: studentIds } }, select: { id: true, fullName: true, studentCode: true } });
+    const studentMap = new Map(students.map(student => [student.id, student]));
+    res.json({ summary, transactions: transactions.map(transaction => ({ ...transaction, student: studentMap.get(transaction.studentId) })), settlements });
+  } catch (error) { next(error); }
+});
+
 app.post('/api/v1/canteens', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN), async (req, res, next) => {
   try {
     const input = canteenSchema.parse(req.body);
     if (!scopedSchool(req.claims!, input.schoolId)) return res.status(403).json({ error: 'SCHOOL_SCOPE_DENIED' });
 
     const operator = await prisma.user.findUniqueOrThrow({ where: { id: input.operatorId }, select: { id: true, role: true, status: true, schoolId: true } });
-    if (operator.role !== Role.CANTEEN_OPERATOR || operator.status !== EntityStatus.ACTIVE) return res.status(400).json({ error: 'INVALID_CANTEEN_OPERATOR' });
+    if (!((operator.role === Role.CANTEEN_OWNER || operator.role === Role.CANTEEN_OPERATOR) && operator.status === EntityStatus.ACTIVE)) return res.status(400).json({ error: 'INVALID_CANTEEN_OPERATOR' });
     if (operator.schoolId && operator.schoolId !== input.schoolId) return res.status(403).json({ error: 'OPERATOR_SCHOOL_SCOPE_DENIED' });
 
     const canteen = await prisma.$transaction(async tx => {
@@ -406,6 +422,33 @@ app.get('/api/v1/students', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN
     res.json({ students });
   } catch (error) { next(error); }
 });
+
+app.get('/api/v1/students/:studentId/details', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
+  try {
+    const studentId = routeParam(req.params.studentId);
+    const student = await prisma.student.findUniqueOrThrow({
+      where: { id: studentId },
+      include: {
+        school: { select: { id: true, name: true, schoolCode: true, city: true } },
+        wallet: { select: { id: true, balance: true, currency: true, status: true, updatedAt: true } },
+        cards: { orderBy: { issuedAt: 'desc' } }
+      }
+    });
+    if (!scopedSchool(req.claims!, student.schoolId)) return res.status(403).json({ error: 'SCHOOL_SCOPE_DENIED' });
+    const transactions = await prisma.walletTransaction.findMany({
+      where: { studentId },
+      include: { school: { select: { name: true, schoolCode: true } }, canteen: { select: { name: true, canteenCode: true } }, performedBy: { select: { email: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 150
+    });
+    const totals = transactions.reduce((sum, transaction) => {
+      sum[transaction.type] = (sum[transaction.type] ?? 0) + money(transaction.amount);
+      return sum;
+    }, {} as Record<string, number>);
+    res.json({ student, transactions, totals: Object.fromEntries(Object.entries(totals).map(([type, amount]) => [type, asMoney(amount)])) });
+  } catch (error) { next(error); }
+});
+
 app.post('/api/v1/students', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN), async (req, res, next) => {
   try {
     const input = studentSchema.parse(req.body);
@@ -662,7 +705,7 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
       prisma.walletTransaction.findMany({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: last7Start } }, select: { amount: true, createdAt: true } }),
       prisma.walletTransaction.groupBy({ by: ['studentId'], where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: periodStart } }, _sum: { amount: true }, _count: { id: true }, orderBy: { _count: { id: 'desc' } }, take: 5 }),
       prisma.walletTransaction.groupBy({ by: ['schoolId'], where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: periodStart } }, _sum: { amount: true }, _count: { id: true }, orderBy: { _count: { id: 'desc' } }, take: 5 }),
-      prisma.user.findMany({ where: { role: Role.CANTEEN_OPERATOR, status: EntityStatus.ACTIVE, ...(schoolId ? { schoolId } : {}) }, select: { id: true } })
+      prisma.user.findMany({ where: { role: { in: [Role.CANTEEN_OPERATOR, Role.CANTEEN_OWNER] }, status: EntityStatus.ACTIVE, ...(schoolId ? { operatedCanteens: { some: { schoolId } } } : {}) }, select: { id: true } })
     ]);
 
     const dailyLimitMap = new Map(activeStudentRows.map(student => [student.id, { student, debit: 0, refund: 0 }]));
@@ -971,7 +1014,7 @@ app.get('/api/v1/exports/monthly-expenses-print', auth, roles(Role.SUPER_ADMIN, 
 
 const debitSchema = z.object({ cardToken: z.string().min(20).max(128), amount: z.coerce.number().positive().max(1000), canteenId: z.string().cuid().optional() });
 
-app.get('/api/v1/cards/lookup', auth, roles(Role.CANTEEN_OPERATOR), async (req, res, next) => {
+app.get('/api/v1/cards/lookup', auth, roles(Role.CANTEEN_CASHIER, Role.CANTEEN_OPERATOR), async (req, res, next) => {
   try {
     await assertNotCanteenOwner(prisma, req.claims!);
     const cardToken = typeof req.query.token === 'string' ? req.query.token.trim() : '';
@@ -1028,7 +1071,7 @@ async function getTodayNetDebit(tx: Prisma.TransactionClient, studentId: string)
   return Math.max(0, debitTotal - Number(refunds._sum.amount ?? 0));
 }
 
-app.post('/api/v1/transactions/debit', auth, roles(Role.CANTEEN_OPERATOR), async (req, res, next) => {
+app.post('/api/v1/transactions/debit', auth, roles(Role.CANTEEN_CASHIER, Role.CANTEEN_OPERATOR), async (req, res, next) => {
   try {
     await assertNotCanteenOwner(prisma, req.claims!);
     const idempotencyKey = req.header('idempotency-key');
@@ -1067,7 +1110,7 @@ async function refundDebit(originalId: string, claims: Claims, req: Request) {
   const original = await prisma.walletTransaction.findUniqueOrThrow({ where: { id: originalId } });
   if (original.type !== TransactionType.DEBIT) throw new Error('REFUND_ONLY_DEBIT');
   if (!scopedSchool(claims, original.schoolId)) throw new Error('SCHOOL_SCOPE_DENIED');
-  if (claims.role === Role.CANTEEN_OPERATOR && original.performedById !== claims.sub) throw new Error('FORBIDDEN');
+  if ((claims.role === Role.CANTEEN_OPERATOR || claims.role === Role.CANTEEN_CASHIER) && original.performedById !== claims.sub) throw new Error('FORBIDDEN');
   const refundReference = `REFUND-${original.id}`;
   const existing = await prisma.walletTransaction.findUnique({ where: { reference: refundReference } });
   if (existing) return { transaction: existing, replayed: true };
@@ -1085,7 +1128,7 @@ async function refundDebit(originalId: string, claims: Claims, req: Request) {
   });
   return { transaction, replayed: false };
 }
-app.post('/api/v1/transactions/refund-by-reference', auth, roles(Role.CANTEEN_OPERATOR), async (req, res, next) => {
+app.post('/api/v1/transactions/refund-by-reference', auth, roles(Role.CANTEEN_CASHIER, Role.CANTEEN_OPERATOR), async (req, res, next) => {
   try {
     await assertNotCanteenOwner(prisma, req.claims!);
     const input = z.object({ reference: z.string().trim().min(8).max(80) }).parse(req.body);
@@ -1107,7 +1150,7 @@ async function canteenDueByUser(canteenUserId: string, claims: Claims) {
     where: { id: canteenUserId },
     select: { id: true, email: true, role: true, schoolId: true, school: { select: { name: true, schoolCode: true } } }
   });
-  if (canteenUser.role !== Role.CANTEEN_OPERATOR) throw new Error('FORBIDDEN');
+  if (!(canteenUser.role === Role.CANTEEN_OPERATOR || canteenUser.role === Role.CANTEEN_OWNER || canteenUser.role === Role.CANTEEN_CASHIER)) throw new Error('FORBIDDEN');
   if (canteenUser.schoolId && !scopedSchool(claims, canteenUser.schoolId)) throw new Error('SCHOOL_SCOPE_DENIED');
   const [lastSettlement, settledAggregate, settlementCount] = await Promise.all([
     prisma.canteenSettlement.findFirst({ where: { canteenUserId }, orderBy: { periodEnd: 'desc' } }),
@@ -1145,7 +1188,7 @@ async function canteenDueByCanteen(canteenId: string, claims: Claims) {
     }
   });
   if (canteen.status !== EntityStatus.ACTIVE) throw new Error('CANTEEN_INACTIVE');
-  if (claims.role === Role.CANTEEN_OPERATOR && canteen.operatorId !== claims.sub) throw new Error('CANTEEN_SCOPE_DENIED');
+  if ((claims.role === Role.CANTEEN_OPERATOR || claims.role === Role.CANTEEN_OWNER) && canteen.operatorId !== claims.sub) throw new Error('CANTEEN_SCOPE_DENIED');
   if (!scopedSchool(claims, canteen.schoolId)) throw new Error('SCHOOL_SCOPE_DENIED');
 
   const [lastSettlement, settledAggregate, settlementCount] = await Promise.all([
@@ -1176,7 +1219,7 @@ async function canteenDueByCanteen(canteenId: string, claims: Claims) {
   };
 }
 
-app.get('/api/v1/canteen/summary', auth, roles(Role.CANTEEN_OPERATOR), async (req, res, next) => {
+app.get('/api/v1/canteen/summary', auth, roles(Role.CANTEEN_CASHIER, Role.CANTEEN_OPERATOR), async (req, res, next) => {
   try {
     await assertNotCanteenOwner(prisma, req.claims!);
     const canteenId = typeof req.query.canteenId === 'string' ? req.query.canteenId : undefined;
@@ -1186,7 +1229,7 @@ app.get('/api/v1/canteen/summary', auth, roles(Role.CANTEEN_OPERATOR), async (re
   } catch (error) { next(error); }
 });
 
-app.get('/api/v1/canteen/owner-summary', auth, roles(Role.CANTEEN_OPERATOR), async (req, res, next) => {
+app.get('/api/v1/canteen/owner-summary', auth, roles(Role.CANTEEN_OWNER, Role.CANTEEN_OPERATOR), async (req, res, next) => {
   try {
     const canteens = await prisma.canteen.findMany({
       where: { operatorId: req.claims!.sub, status: EntityStatus.ACTIVE, ...(req.claims!.schoolId ? { schoolId: req.claims!.schoolId } : {}) },

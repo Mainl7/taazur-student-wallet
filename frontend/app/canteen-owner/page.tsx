@@ -61,11 +61,11 @@ export default function CanteenOwnerPage() {
       const me = await apiFetch('/auth/me');
       if (me.status === 401) return location.assign('/login');
       const meData: { user?: { role: string; schoolId?: string | null } } = await me.json();
-      if (meData.user?.role !== 'CANTEEN_OPERATOR') {
+      if (!['CANTEEN_OWNER', 'CANTEEN_OPERATOR'].includes(meData.user?.role ?? '')) {
         location.assign('/');
         return;
       }
-      if (meData.user.schoolId) {
+      if (meData.user?.role === 'CANTEEN_OPERATOR' && meData.user.schoolId) {
         location.assign('/canteen');
         return;
       }
@@ -123,6 +123,7 @@ export default function CanteenOwnerPage() {
               <th>تمت تسويته</th>
               <th>عدد التسويات</th>
               <th>آخر تسوية</th>
+              <th>التفاصيل</th>
             </tr>
           </thead>
           <tbody>
@@ -137,9 +138,10 @@ export default function CanteenOwnerPage() {
                 <td>{summary.settled} ر.س</td>
                 <td>{summary.settlementCount}</td>
                 <td>{summary.lastSettlementAt ? new Date(summary.lastSettlementAt).toLocaleDateString('ar-SA') : 'لم تتم تسوية سابقة'}</td>
+                <td>{summary.canteen?.id ? <a className="table-link" href={`/canteens/${summary.canteen.id}`}>تفاصيل</a> : '—'}</td>
               </tr>
             ))}
-            {!summaries.length && <tr><td colSpan={9}>لا توجد مقاصف مربوطة بهذا الحساب حتى الآن. اطلب من المدير ربط المقاصف التابعة لك.</td></tr>}
+            {!summaries.length && <tr><td colSpan={10}>لا توجد مقاصف مربوطة بهذا الحساب حتى الآن. اطلب من المدير ربط المقاصف التابعة لك.</td></tr>}
           </tbody>
         </table>
 

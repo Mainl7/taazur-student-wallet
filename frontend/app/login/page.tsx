@@ -35,7 +35,7 @@ export default function Login() {
     if (!response.ok) return setError(errorMessages[data.error ?? ''] ?? 'تعذر تسجيل الدخول.');
 
     localStorage.removeItem('taazur_token');
-    router.push(data.user?.role === 'CANTEEN_OPERATOR' ? (data.user.schoolId ? '/canteen' : '/canteen-owner') : '/');
+    router.push(['CANTEEN_CASHIER', 'CANTEEN_OPERATOR'].includes(data.user?.role ?? '') && data.user?.schoolId ? '/canteen' : ['CANTEEN_OWNER', 'CANTEEN_OPERATOR'].includes(data.user?.role ?? '') ? '/canteen-owner' : '/');
   }
 
   return (

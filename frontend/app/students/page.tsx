@@ -153,7 +153,12 @@ export default function Students() {
                     />
                   ) : '—'}
                 </td>
-                <td><button type="button" onClick={() => setEditing(student)}>تعديل</button></td>
+                <td>
+                  <div className="row-actions">
+                    <a className="table-link" href={`/students/${student.id}`}>تفاصيل</a>
+                    <button type="button" onClick={() => setEditing(student)}>تعديل</button>
+                  </div>
+                </td>
               </tr>
             );
           })}
