@@ -105,7 +105,7 @@ async function buildCardCanvas(input: BarcodeProps) {
   context.scale(scale, scale);
 
   const background = context.createLinearGradient(0, 0, cardWidth, cardHeight);
-  background.addColorStop(0, '#0f6a4f');
+  background.addColorStop(0, '#16765a');
   background.addColorStop(0.5, '#075139');
   background.addColorStop(1, '#032a22');
   roundedRect(context, 0, 0, cardWidth, cardHeight, 42);
@@ -113,9 +113,9 @@ async function buildCardCanvas(input: BarcodeProps) {
   context.fill();
   drawPattern(context);
 
-  const shade = context.createRadialGradient(610, 228, 40, 610, 228, 430);
-  shade.addColorStop(0, 'rgba(255,255,255,.09)');
-  shade.addColorStop(1, 'rgba(0,0,0,.32)');
+  const shade = context.createRadialGradient(700, 160, 30, 700, 160, 420);
+  shade.addColorStop(0, 'rgba(255,255,255,.14)');
+  shade.addColorStop(1, 'rgba(0,0,0,.28)');
   context.fillStyle = shade;
   context.fill();
 
@@ -139,17 +139,17 @@ async function buildCardCanvas(input: BarcodeProps) {
   context.strokeStyle = 'rgba(216,189,121,.88)';
   context.lineWidth = 4;
   context.beginPath();
-  context.arc(710, 392, 500, Math.PI * 0.78, Math.PI * 1.54, true);
+  context.arc(696, 382, 470, Math.PI * 0.78, Math.PI * 1.54, true);
   context.stroke();
   context.strokeStyle = 'rgba(255,255,255,.12)';
-  context.lineWidth = 58;
+  context.lineWidth = 48;
   context.beginPath();
-  context.arc(628, 390, 440, Math.PI * 0.76, Math.PI * 1.52, true);
+  context.arc(620, 382, 414, Math.PI * 0.76, Math.PI * 1.52, true);
   context.stroke();
   context.strokeStyle = 'rgba(255,255,255,.08)';
-  context.lineWidth = 78;
+  context.lineWidth = 62;
   context.beginPath();
-  context.arc(760, 430, 560, Math.PI * 0.76, Math.PI * 1.5, true);
+  context.arc(748, 420, 520, Math.PI * 0.76, Math.PI * 1.5, true);
   context.stroke();
   context.restore();
 
@@ -159,7 +159,19 @@ async function buildCardCanvas(input: BarcodeProps) {
   context.stroke();
 
   const logoImage = await loadImage('/student-card-logo.png');
-  context.drawImage(logoImage, 650, 46, 150, 150);
+  context.save();
+  context.shadowColor = 'rgba(0,0,0,.22)';
+  context.shadowBlur = 18;
+  context.shadowOffsetY = 8;
+  roundedRect(context, 632, 34, 188, 170, 24);
+  context.fillStyle = 'rgba(255,248,230,.94)';
+  context.fill();
+  context.shadowColor = 'transparent';
+  context.strokeStyle = 'rgba(216,189,121,.72)';
+  context.lineWidth = 3;
+  context.stroke();
+  context.restore();
+  context.drawImage(logoImage, 656, 52, 140, 140);
 
   context.direction = 'rtl';
   context.textAlign = 'right';
@@ -201,11 +213,11 @@ async function buildCardCanvas(input: BarcodeProps) {
   drawDiamond(context, 790, 434, 10);
 
   context.fillStyle = '#d9bd79';
-  context.font = '800 28px Tahoma, Arial, sans-serif';
-  context.fillText('المدرسة', 770, 474);
+  context.font = '800 26px Tahoma, Arial, sans-serif';
+  context.fillText('المدرسة', 770, 456);
   context.fillStyle = '#ffffff';
-  context.font = '900 31px Tahoma, Arial, sans-serif';
-  context.fillText(input.schoolName, 770, 520, 420);
+  context.font = '900 26px Tahoma, Arial, sans-serif';
+  context.fillText(input.schoolName, 770, 500, 450);
 
   roundedRect(context, 74, 266, 190, 190, 14);
   context.fillStyle = '#ffffff';
@@ -297,7 +309,9 @@ export default function Barcode(props: BarcodeProps) {
   return (
     <div className="barcode-card" aria-label={`بطاقة الطالب ${studentName}`}>
       <div className="student-print-card">
-        <img className="student-card-logo" src="/student-card-logo.png" alt="" aria-hidden="true" />
+        <div className="student-logo-badge" aria-hidden="true">
+          <img className="student-card-logo" src="/student-card-logo.png" alt="" />
+        </div>
         <div className="student-card-info">
           <small>اسم الطالب</small>
           <strong>{studentName}</strong>
