@@ -62,6 +62,39 @@ function roundedRect(context: CanvasRenderingContext2D, x: number, y: number, wi
   context.closePath();
 }
 
+function drawPattern(context: CanvasRenderingContext2D) {
+  context.save();
+  context.strokeStyle = 'rgba(216,189,121,.13)';
+  context.lineWidth = 2;
+  for (let x = 16; x < 356; x += 58) {
+    for (let y = 16; y < cardHeight - 18; y += 58) {
+      context.beginPath();
+      context.moveTo(x + 29, y);
+      context.lineTo(x + 42, y + 16);
+      context.lineTo(x + 58, y + 29);
+      context.lineTo(x + 42, y + 42);
+      context.lineTo(x + 29, y + 58);
+      context.lineTo(x + 16, y + 42);
+      context.lineTo(x, y + 29);
+      context.lineTo(x + 16, y + 16);
+      context.closePath();
+      context.stroke();
+      context.strokeRect(x + 15, y + 15, 28, 28);
+    }
+  }
+  context.restore();
+}
+
+function drawDiamond(context: CanvasRenderingContext2D, x: number, y: number, size: number) {
+  context.beginPath();
+  context.moveTo(x, y - size);
+  context.lineTo(x + size, y);
+  context.lineTo(x, y + size);
+  context.lineTo(x - size, y);
+  context.closePath();
+  context.fill();
+}
+
 async function buildCardCanvas(input: BarcodeProps) {
   const scale = 4;
   const canvas = document.createElement('canvas');
@@ -72,83 +105,122 @@ async function buildCardCanvas(input: BarcodeProps) {
   context.scale(scale, scale);
 
   const background = context.createLinearGradient(0, 0, cardWidth, cardHeight);
-  background.addColorStop(0, '#063927');
-  background.addColorStop(0.52, '#0b5a42');
-  background.addColorStop(1, '#094630');
+  background.addColorStop(0, '#0f6a4f');
+  background.addColorStop(0.5, '#075139');
+  background.addColorStop(1, '#032a22');
   roundedRect(context, 0, 0, cardWidth, cardHeight, 42);
   context.fillStyle = background;
   context.fill();
+  drawPattern(context);
 
-  const shine = context.createLinearGradient(0, 0, cardWidth, cardHeight);
-  shine.addColorStop(0, 'rgba(255,255,255,.20)');
-  shine.addColorStop(0.5, 'rgba(255,255,255,.04)');
+  const shade = context.createRadialGradient(610, 228, 40, 610, 228, 430);
+  shade.addColorStop(0, 'rgba(255,255,255,.09)');
+  shade.addColorStop(1, 'rgba(0,0,0,.32)');
+  context.fillStyle = shade;
+  context.fill();
+
+  const shine = context.createLinearGradient(80, 0, 540, 540);
+  shine.addColorStop(0, 'rgba(255,255,255,.16)');
+  shine.addColorStop(0.45, 'rgba(255,255,255,.03)');
   shine.addColorStop(1, 'rgba(255,255,255,0)');
   context.fillStyle = shine;
   context.beginPath();
-  context.moveTo(-80, 90);
-  context.bezierCurveTo(170, 5, 360, 42, 575, -25);
-  context.bezierCurveTo(710, -68, 805, -44, 930, 25);
-  context.lineTo(930, -60);
-  context.lineTo(-80, -60);
+  context.moveTo(0, 0);
+  context.lineTo(856, 0);
+  context.lineTo(470, 540);
+  context.lineTo(0, 540);
   context.closePath();
   context.fill();
 
-  context.fillStyle = 'rgba(255,255,255,.06)';
+  context.save();
   context.beginPath();
-  context.arc(750, 432, 170, 0, Math.PI * 2);
-  context.fill();
-  context.fillStyle = 'rgba(200,164,91,.14)';
+  roundedRect(context, 0, 0, cardWidth, cardHeight, 42);
+  context.clip();
+  context.strokeStyle = 'rgba(216,189,121,.88)';
+  context.lineWidth = 4;
   context.beginPath();
-  context.arc(92, 88, 92, 0, Math.PI * 2);
-  context.fill();
+  context.arc(710, 392, 500, Math.PI * 0.78, Math.PI * 1.54, true);
+  context.stroke();
+  context.strokeStyle = 'rgba(255,255,255,.12)';
+  context.lineWidth = 58;
+  context.beginPath();
+  context.arc(628, 390, 440, Math.PI * 0.76, Math.PI * 1.52, true);
+  context.stroke();
+  context.strokeStyle = 'rgba(255,255,255,.08)';
+  context.lineWidth = 78;
+  context.beginPath();
+  context.arc(760, 430, 560, Math.PI * 0.76, Math.PI * 1.5, true);
+  context.stroke();
+  context.restore();
 
   context.strokeStyle = '#c8a45b';
-  context.globalAlpha = 0.8;
-  context.lineWidth = 5;
-  context.lineCap = 'round';
-  context.beginPath();
-  context.moveTo(92, 460);
-  context.lineTo(520, 460);
-  context.stroke();
-  context.strokeStyle = '#ffffff';
-  context.globalAlpha = 0.24;
   context.lineWidth = 3;
-  context.beginPath();
-  context.moveTo(92, 486);
-  context.lineTo(390, 486);
+  roundedRect(context, 10, 10, cardWidth - 20, cardHeight - 20, 36);
   context.stroke();
-  context.globalAlpha = 1;
 
   const logoImage = await loadImage('/student-card-logo.png');
-  context.drawImage(logoImage, 714, 24, 106, 106);
+  context.drawImage(logoImage, 650, 46, 150, 150);
 
   context.direction = 'rtl';
-  context.textAlign = 'center';
+  context.textAlign = 'right';
+  context.shadowColor = 'rgba(0,0,0,.34)';
+  context.shadowBlur = 8;
+  context.shadowOffsetY = 2;
   context.fillStyle = '#d9bd79';
-  context.font = '700 30px Tahoma, Arial, sans-serif';
-  context.fillText('بطاقة طالب', 548, 118);
+  context.font = '800 29px Tahoma, Arial, sans-serif';
+  context.fillText('اسم الطالب', 770, 250);
   context.fillStyle = '#ffffff';
-  context.font = '800 48px Tahoma, Arial, sans-serif';
-  context.fillText(input.studentName, 548, 222, 420);
-  context.fillStyle = '#e8f3ee';
-  context.font = '700 27px Tahoma, Arial, sans-serif';
-  context.fillText(`رمز الطالب: ${input.studentCode}`, 548, 304, 420);
-  context.font = '700 25px Tahoma, Arial, sans-serif';
-  context.fillText(input.schoolName, 548, 374, 420);
+  context.font = '900 40px Tahoma, Arial, sans-serif';
+  context.fillText(input.studentName, 770, 304, 360);
+  context.shadowBlur = 0;
+  context.strokeStyle = '#c8a45b';
+  context.lineWidth = 2;
+  context.beginPath();
+  context.moveTo(438, 328);
+  context.lineTo(778, 328);
+  context.stroke();
+  context.fillStyle = '#c8a45b';
+  drawDiamond(context, 790, 328, 10);
 
-  roundedRect(context, 54, 122, 284, 284, 30);
+  context.fillStyle = '#d9bd79';
+  context.font = '800 28px Tahoma, Arial, sans-serif';
+  context.fillText('رمز الطالب', 770, 366);
+  context.fillStyle = '#ffffff';
+  context.font = '900 34px Tahoma, Arial, sans-serif';
+  context.direction = 'ltr';
+  context.textAlign = 'right';
+  context.fillText(input.studentCode, 770, 414, 330);
+  context.direction = 'rtl';
+  context.strokeStyle = '#c8a45b';
+  context.lineWidth = 2;
+  context.beginPath();
+  context.moveTo(438, 434);
+  context.lineTo(778, 434);
+  context.stroke();
+  context.fillStyle = '#c8a45b';
+  drawDiamond(context, 790, 434, 10);
+
+  context.fillStyle = '#d9bd79';
+  context.font = '800 28px Tahoma, Arial, sans-serif';
+  context.fillText('المدرسة', 770, 474);
+  context.fillStyle = '#ffffff';
+  context.font = '900 31px Tahoma, Arial, sans-serif';
+  context.fillText(input.schoolName, 770, 520, 420);
+
+  roundedRect(context, 74, 266, 190, 190, 14);
   context.fillStyle = '#ffffff';
   context.fill();
   context.strokeStyle = '#d9bd79';
-  context.lineWidth = 5;
+  context.lineWidth = 4;
   context.stroke();
-  const qrUrl = await QRCode.toDataURL(input.value, { width: 250, margin: 1, errorCorrectionLevel: 'M' });
+  const qrUrl = await QRCode.toDataURL(input.value, { width: 170, margin: 1, errorCorrectionLevel: 'M' });
   const qrImage = await loadImage(qrUrl);
-  context.drawImage(qrImage, 71, 139, 250, 250);
+  context.drawImage(qrImage, 84, 276, 170, 170);
 
-  context.fillStyle = '#ffffff';
-  context.font = '700 20px Tahoma, Arial, sans-serif';
-  context.fillText('امسح QR للدفع', 196, 450);
+  context.textAlign = 'center';
+  context.fillStyle = '#d9bd79';
+  context.font = '800 25px Tahoma, Arial, sans-serif';
+  context.fillText('رمز البطاقة', 169, 492);
   return canvas;
 }
 
@@ -226,14 +298,18 @@ export default function Barcode(props: BarcodeProps) {
     <div className="barcode-card student-print-card" aria-label={`بطاقة الطالب ${studentName}`}>
       <img className="student-card-logo" src="/student-card-logo.png" alt="" aria-hidden="true" />
       <div className="student-card-info">
-        <small>بطاقة طالب</small>
+        <small>اسم الطالب</small>
         <strong>{studentName}</strong>
-        <span>رمز الطالب: {studentCode}</span>
+        <i />
+        <small>رمز الطالب</small>
+        <b>{studentCode}</b>
+        <i />
+        <small>المدرسة</small>
         <span>{schoolName}</span>
       </div>
       <div className="student-card-qr">
         {qrUrl && <img className="qr-code" src={qrUrl} alt={`QR بطاقة الطالب ${studentName}`} />}
-        <span>QR للدفع</span>
+        <span>رمز البطاقة</span>
       </div>
       {downloadable && (
         <div className="barcode-downloads">
