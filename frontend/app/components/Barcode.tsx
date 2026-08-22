@@ -295,21 +295,23 @@ export default function Barcode(props: BarcodeProps) {
   };
 
   return (
-    <div className="barcode-card student-print-card" aria-label={`بطاقة الطالب ${studentName}`}>
-      <img className="student-card-logo" src="/student-card-logo.png" alt="" aria-hidden="true" />
-      <div className="student-card-info">
-        <small>اسم الطالب</small>
-        <strong>{studentName}</strong>
-        <i />
-        <small>رمز الطالب</small>
-        <b>{studentCode}</b>
-        <i />
-        <small>المدرسة</small>
-        <span>{schoolName}</span>
-      </div>
-      <div className="student-card-qr">
-        {qrUrl && <img className="qr-code" src={qrUrl} alt={`QR بطاقة الطالب ${studentName}`} />}
-        <span>رمز البطاقة</span>
+    <div className="barcode-card" aria-label={`بطاقة الطالب ${studentName}`}>
+      <div className="student-print-card">
+        <img className="student-card-logo" src="/student-card-logo.png" alt="" aria-hidden="true" />
+        <div className="student-card-info">
+          <small>اسم الطالب</small>
+          <strong>{studentName}</strong>
+          <i />
+          <small>رمز الطالب</small>
+          <b>{studentCode}</b>
+          <i />
+          <small>المدرسة</small>
+          <span>{schoolName}</span>
+        </div>
+        <div className="student-card-qr">
+          {qrUrl && <img className="qr-code" src={qrUrl} alt={`QR بطاقة الطالب ${studentName}`} />}
+          <span>رمز البطاقة</span>
+        </div>
       </div>
       {downloadable && (
         <div className="barcode-downloads">
