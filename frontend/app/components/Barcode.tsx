@@ -119,6 +119,9 @@ async function buildCardCanvas(input: BarcodeProps) {
   context.stroke();
   context.globalAlpha = 1;
 
+  const logoImage = await loadImage('/student-card-logo.png');
+  context.drawImage(logoImage, 714, 24, 106, 106);
+
   context.direction = 'rtl';
   context.textAlign = 'center';
   context.fillStyle = '#d9bd79';
@@ -221,6 +224,7 @@ export default function Barcode(props: BarcodeProps) {
 
   return (
     <div className="barcode-card student-print-card" aria-label={`بطاقة الطالب ${studentName}`}>
+      <img className="student-card-logo" src="/student-card-logo.png" alt="" aria-hidden="true" />
       <div className="student-card-info">
         <small>بطاقة طالب</small>
         <strong>{studentName}</strong>
