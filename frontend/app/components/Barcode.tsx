@@ -104,135 +104,156 @@ async function buildCardCanvas(input: BarcodeProps) {
   if (!context) throw new Error('CANVAS_NOT_SUPPORTED');
   context.scale(scale, scale);
 
-  const background = context.createLinearGradient(0, 0, cardWidth, cardHeight);
-  background.addColorStop(0, '#16765a');
-  background.addColorStop(0.5, '#075139');
-  background.addColorStop(1, '#032a22');
   roundedRect(context, 0, 0, cardWidth, cardHeight, 42);
-  context.fillStyle = background;
-  context.fill();
-  drawPattern(context);
-
-  const shade = context.createRadialGradient(700, 160, 30, 700, 160, 420);
-  shade.addColorStop(0, 'rgba(255,255,255,.14)');
-  shade.addColorStop(1, 'rgba(0,0,0,.28)');
-  context.fillStyle = shade;
+  context.fillStyle = '#f7f0df';
   context.fill();
 
-  const shine = context.createLinearGradient(80, 0, 540, 540);
-  shine.addColorStop(0, 'rgba(255,255,255,.16)');
-  shine.addColorStop(0.45, 'rgba(255,255,255,.03)');
-  shine.addColorStop(1, 'rgba(255,255,255,0)');
-  context.fillStyle = shine;
+  context.save();
+  roundedRect(context, 0, 0, cardWidth, cardHeight, 42);
+  context.clip();
+
+  const greenPanel = context.createLinearGradient(360, 0, cardWidth, cardHeight);
+  greenPanel.addColorStop(0, '#12664e');
+  greenPanel.addColorStop(0.55, '#084633');
+  greenPanel.addColorStop(1, '#03281f');
+  context.fillStyle = greenPanel;
+  context.fillRect(360, 0, 496, 540);
+
+  context.fillStyle = 'rgba(200,164,91,.94)';
+  context.beginPath();
+  context.moveTo(330, 0);
+  context.lineTo(392, 0);
+  context.lineTo(456, 540);
+  context.lineTo(394, 540);
+  context.closePath();
+  context.fill();
+
+  context.fillStyle = '#f7f0df';
   context.beginPath();
   context.moveTo(0, 0);
-  context.lineTo(856, 0);
-  context.lineTo(470, 540);
+  context.lineTo(338, 0);
+  context.lineTo(402, 540);
   context.lineTo(0, 540);
   context.closePath();
   context.fill();
 
-  context.save();
-  context.beginPath();
-  roundedRect(context, 0, 0, cardWidth, cardHeight, 42);
-  context.clip();
-  context.strokeStyle = 'rgba(216,189,121,.88)';
-  context.lineWidth = 4;
-  context.beginPath();
-  context.arc(696, 382, 470, Math.PI * 0.78, Math.PI * 1.54, true);
-  context.stroke();
-  context.strokeStyle = 'rgba(255,255,255,.12)';
-  context.lineWidth = 48;
-  context.beginPath();
-  context.arc(620, 382, 414, Math.PI * 0.76, Math.PI * 1.52, true);
-  context.stroke();
-  context.strokeStyle = 'rgba(255,255,255,.08)';
-  context.lineWidth = 62;
-  context.beginPath();
-  context.arc(748, 420, 520, Math.PI * 0.76, Math.PI * 1.5, true);
-  context.stroke();
+  context.strokeStyle = 'rgba(11,90,66,.08)';
+  context.lineWidth = 2;
+  for (let x = 30; x < 318; x += 38) {
+    context.beginPath();
+    context.moveTo(x, 22);
+    context.lineTo(x + 56, 518);
+    context.stroke();
+  }
+  for (let y = 38; y < 512; y += 42) {
+    context.beginPath();
+    context.moveTo(20, y);
+    context.lineTo(350, y);
+    context.stroke();
+  }
+
+  const glow = context.createRadialGradient(672, 118, 20, 672, 118, 350);
+  glow.addColorStop(0, 'rgba(255,255,255,.16)');
+  glow.addColorStop(1, 'rgba(255,255,255,0)');
+  context.fillStyle = glow;
+  context.fillRect(360, 0, 496, 540);
+
   context.restore();
 
   context.strokeStyle = '#c8a45b';
-  context.lineWidth = 3;
-  roundedRect(context, 10, 10, cardWidth - 20, cardHeight - 20, 36);
+  context.lineWidth = 4;
+  roundedRect(context, 12, 12, cardWidth - 24, cardHeight - 24, 34);
   context.stroke();
+
+  context.save();
+  context.shadowColor = 'rgba(20,52,42,.16)';
+  context.shadowBlur = 22;
+  context.shadowOffsetY = 10;
+  roundedRect(context, 58, 104, 244, 244, 24);
+  context.fillStyle = '#ffffff';
+  context.fill();
+  context.shadowColor = 'transparent';
+  context.strokeStyle = '#d5b468';
+  context.lineWidth = 5;
+  context.stroke();
+  context.restore();
+
+  const qrUrl = await QRCode.toDataURL(input.value, { width: 210, margin: 1, errorCorrectionLevel: 'M' });
+  const qrImage = await loadImage(qrUrl);
+  context.drawImage(qrImage, 75, 121, 210, 210);
+
+  context.direction = 'rtl';
+  context.textAlign = 'center';
+  context.fillStyle = '#0b5a42';
+  context.font = '900 28px Tahoma, Arial, sans-serif';
+  context.fillText('رمز البطاقة', 180, 400);
+
+  context.fillStyle = 'rgba(11,90,66,.1)';
+  roundedRect(context, 58, 432, 244, 42, 21);
+  context.fill();
+  context.fillStyle = '#0b5a42';
+  context.font = '800 18px Tahoma, Arial, sans-serif';
+  context.fillText('امسح QR للدفع', 180, 460);
 
   const logoImage = await loadImage('/student-card-logo.png');
   context.save();
-  context.shadowColor = 'rgba(0,0,0,.22)';
+  context.shadowColor = 'rgba(0,0,0,.2)';
   context.shadowBlur = 18;
   context.shadowOffsetY = 8;
-  roundedRect(context, 632, 34, 188, 170, 24);
-  context.fillStyle = 'rgba(255,248,230,.94)';
+  roundedRect(context, 662, 38, 148, 132, 24);
+  context.fillStyle = 'rgba(255,252,244,.97)';
   context.fill();
   context.shadowColor = 'transparent';
-  context.strokeStyle = 'rgba(216,189,121,.72)';
+  context.strokeStyle = 'rgba(216,189,121,.78)';
   context.lineWidth = 3;
   context.stroke();
   context.restore();
-  context.drawImage(logoImage, 656, 52, 140, 140);
+  context.drawImage(logoImage, 684, 50, 104, 104);
 
   context.direction = 'rtl';
   context.textAlign = 'right';
-  context.shadowColor = 'rgba(0,0,0,.34)';
+  context.shadowColor = 'rgba(0,0,0,.32)';
   context.shadowBlur = 8;
   context.shadowOffsetY = 2;
   context.fillStyle = '#d9bd79';
-  context.font = '800 29px Tahoma, Arial, sans-serif';
-  context.fillText('اسم الطالب', 770, 250);
+  context.font = '900 26px Tahoma, Arial, sans-serif';
+  context.fillText('اسم الطالب', 790, 226);
   context.fillStyle = '#ffffff';
-  context.font = '900 40px Tahoma, Arial, sans-serif';
-  context.fillText(input.studentName, 770, 304, 360);
+  context.font = '900 42px Tahoma, Arial, sans-serif';
+  context.fillText(input.studentName, 790, 282, 390);
+
   context.shadowBlur = 0;
-  context.strokeStyle = '#c8a45b';
+  context.strokeStyle = 'rgba(217,189,121,.9)';
   context.lineWidth = 2;
   context.beginPath();
-  context.moveTo(438, 328);
-  context.lineTo(778, 328);
+  context.moveTo(462, 312);
+  context.lineTo(790, 312);
   context.stroke();
-  context.fillStyle = '#c8a45b';
-  drawDiamond(context, 790, 328, 10);
 
   context.fillStyle = '#d9bd79';
-  context.font = '800 28px Tahoma, Arial, sans-serif';
-  context.fillText('رمز الطالب', 770, 366);
+  context.font = '900 25px Tahoma, Arial, sans-serif';
+  context.fillText('رمز الطالب', 790, 358);
   context.fillStyle = '#ffffff';
   context.font = '900 34px Tahoma, Arial, sans-serif';
   context.direction = 'ltr';
   context.textAlign = 'right';
-  context.fillText(input.studentCode, 770, 414, 330);
+  context.fillText(input.studentCode, 790, 406, 330);
+
   context.direction = 'rtl';
-  context.strokeStyle = '#c8a45b';
-  context.lineWidth = 2;
-  context.beginPath();
-  context.moveTo(438, 434);
-  context.lineTo(778, 434);
-  context.stroke();
-  context.fillStyle = '#c8a45b';
-  drawDiamond(context, 790, 434, 10);
-
-  context.fillStyle = '#d9bd79';
-  context.font = '800 26px Tahoma, Arial, sans-serif';
-  context.fillText('المدرسة', 770, 456);
-  context.fillStyle = '#ffffff';
-  context.font = '900 26px Tahoma, Arial, sans-serif';
-  context.fillText(input.schoolName, 770, 500, 450);
-
-  roundedRect(context, 74, 266, 190, 190, 14);
-  context.fillStyle = '#ffffff';
+  context.textAlign = 'right';
+  context.fillStyle = 'rgba(255,255,255,.1)';
+  roundedRect(context, 426, 438, 380, 70, 20);
+  context.fillStyle = 'rgba(255,255,255,.1)';
   context.fill();
-  context.strokeStyle = '#d9bd79';
-  context.lineWidth = 4;
+  context.strokeStyle = 'rgba(216,189,121,.72)';
+  context.lineWidth = 1.5;
   context.stroke();
-  const qrUrl = await QRCode.toDataURL(input.value, { width: 170, margin: 1, errorCorrectionLevel: 'M' });
-  const qrImage = await loadImage(qrUrl);
-  context.drawImage(qrImage, 84, 276, 170, 170);
-
-  context.textAlign = 'center';
   context.fillStyle = '#d9bd79';
-  context.font = '800 25px Tahoma, Arial, sans-serif';
-  context.fillText('رمز البطاقة', 169, 492);
+  context.font = '900 21px Tahoma, Arial, sans-serif';
+  context.fillText('المدرسة', 790, 464);
+  context.fillStyle = '#ffffff';
+  context.font = '900 24px Tahoma, Arial, sans-serif';
+  context.fillText(input.schoolName, 790, 496, 340);
   return canvas;
 }
 
