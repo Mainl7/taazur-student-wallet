@@ -122,7 +122,7 @@ async function buildCardCanvas(input: BarcodeProps) {
   shade.addColorStop(1, 'rgba(0,0,0,.18)');
   context.fillStyle = shade;
   context.fillRect(0, 0, cardWidth, cardHeight);
-  context.fillStyle = 'rgba(1,31,23,.38)';
+  context.fillStyle = 'rgba(1,31,23,.42)';
   context.beginPath();
   context.moveTo(cardWidth, 0);
   context.lineTo(760, 0);
@@ -130,13 +130,30 @@ async function buildCardCanvas(input: BarcodeProps) {
   context.lineTo(cardWidth, cardHeight);
   context.closePath();
   context.fill();
-  context.strokeStyle = 'rgba(216,189,121,.82)';
-  context.lineWidth = 2.3;
+
+  // The wide curved sweep is the defining shape of the approved reference.
+  context.fillStyle = 'rgba(18,108,82,.58)';
   context.beginPath();
-  context.arc(395, 194, 122, Math.PI * .68, Math.PI * 1.58);
-  context.stroke();
+  context.moveTo(104, -14);
+  context.bezierCurveTo(396, 8, 492, 166, 702, cardHeight + 18);
+  context.lineTo(570, cardHeight + 18);
+  context.bezierCurveTo(386, 306, 322, 138, -18, 84);
+  context.closePath();
+  context.fill();
+  context.fillStyle = 'rgba(1,39,30,.48)';
   context.beginPath();
-  context.arc(382, 366, 154, Math.PI * .68, Math.PI * 1.35);
+  context.moveTo(130, 0);
+  context.bezierCurveTo(406, 28, 466, 176, 628, cardHeight);
+  context.lineTo(548, cardHeight);
+  context.bezierCurveTo(382, 294, 306, 146, -12, 98);
+  context.closePath();
+  context.fill();
+
+  context.strokeStyle = 'rgba(216,189,121,.92)';
+  context.lineWidth = 2.4;
+  context.beginPath();
+  context.moveTo(410, -20);
+  context.bezierCurveTo(190, 74, 170, 280, 562, cardHeight + 20);
   context.stroke();
   context.restore();
 
@@ -185,47 +202,47 @@ async function buildCardCanvas(input: BarcodeProps) {
   context.shadowOffsetY = 2;
   context.fillStyle = '#d9bd79';
   context.font = '900 30px Tahoma, Arial, sans-serif';
-  context.fillText('اسم الطالب', 790, 250);
+  context.fillText('اسم الطالب', 790, 232);
   context.fillStyle = '#ffffff';
   context.font = '900 46px Tahoma, Arial, sans-serif';
-  context.fillText(input.studentName, 790, 312, 390);
+  context.fillText(input.studentName, 790, 288, 390);
 
   context.shadowBlur = 0;
   context.strokeStyle = 'rgba(217,189,121,.9)';
   context.lineWidth = 2;
   context.beginPath();
-  context.moveTo(430, 340);
-  context.lineTo(790, 340);
+  context.moveTo(430, 316);
+  context.lineTo(790, 316);
   context.stroke();
   context.fillStyle = '#d9bd79';
-  drawDiamond(context, 802, 340, 10);
+  drawDiamond(context, 802, 316, 10);
 
   context.fillStyle = '#d9bd79';
   context.font = '900 30px Tahoma, Arial, sans-serif';
-  context.fillText('رمز الطالب', 790, 388);
+  context.fillText('رمز الطالب', 790, 360);
   context.fillStyle = '#ffffff';
   context.font = '900 40px Tahoma, Arial, sans-serif';
   context.direction = 'ltr';
   context.textAlign = 'right';
-  context.fillText(input.studentCode, 790, 438, 330);
+  context.fillText(input.studentCode, 790, 404, 330);
 
   context.direction = 'rtl';
   context.textAlign = 'right';
   context.strokeStyle = 'rgba(217,189,121,.9)';
   context.lineWidth = 2;
   context.beginPath();
-  context.moveTo(430, 462);
-  context.lineTo(790, 462);
+  context.moveTo(430, 430);
+  context.lineTo(790, 430);
   context.stroke();
   context.fillStyle = '#d9bd79';
-  drawDiamond(context, 802, 462, 10);
+  drawDiamond(context, 802, 430, 10);
 
   context.fillStyle = '#d9bd79';
   context.font = '900 28px Tahoma, Arial, sans-serif';
-  context.fillText('المدرسة', 790, 486);
+  context.fillText('المدرسة', 790, 462);
   context.fillStyle = '#ffffff';
-  context.font = '900 24px Tahoma, Arial, sans-serif';
-  context.fillText(input.schoolName, 790, 520, 450);
+  context.font = '900 23px Tahoma, Arial, sans-serif';
+  context.fillText(input.schoolName, 790, 500, 450);
   return canvas;
 }
 
