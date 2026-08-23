@@ -131,12 +131,12 @@ async function buildCardCanvas(input: BarcodeProps) {
   context.closePath();
   context.fill();
   context.strokeStyle = 'rgba(216,189,121,.82)';
-  context.lineWidth = 3;
+  context.lineWidth = 2.3;
   context.beginPath();
-  context.arc(375, 170, 164, Math.PI * .58, Math.PI * 1.62);
+  context.arc(395, 194, 122, Math.PI * .68, Math.PI * 1.58);
   context.stroke();
   context.beginPath();
-  context.arc(400, 348, 212, Math.PI * .54, Math.PI * 1.43);
+  context.arc(382, 366, 154, Math.PI * .68, Math.PI * 1.35);
   context.stroke();
   context.restore();
 
@@ -169,8 +169,13 @@ async function buildCardCanvas(input: BarcodeProps) {
   context.fillText('رمز البطاقة', 169, 498);
 
   const logoImage = await loadImage('/student-card-logo.png');
-  context.globalAlpha = .86;
-  context.drawImage(logoImage, 650, 46, 150, 150);
+  const logoGlow = context.createRadialGradient(724, 122, 14, 724, 122, 116);
+  logoGlow.addColorStop(0, 'rgba(255,255,255,.13)');
+  logoGlow.addColorStop(1, 'rgba(255,255,255,0)');
+  context.fillStyle = logoGlow;
+  context.fillRect(590, 10, 260, 230);
+  context.globalAlpha = .94;
+  context.drawImage(logoImage, 650, 48, 150, 150);
   context.globalAlpha = 1;
 
   context.direction = 'rtl';
@@ -216,11 +221,11 @@ async function buildCardCanvas(input: BarcodeProps) {
   drawDiamond(context, 802, 462, 10);
 
   context.fillStyle = '#d9bd79';
-  context.font = '900 30px Tahoma, Arial, sans-serif';
-  context.fillText('المدرسة', 790, 500);
+  context.font = '900 28px Tahoma, Arial, sans-serif';
+  context.fillText('المدرسة', 790, 486);
   context.fillStyle = '#ffffff';
-  context.font = '900 27px Tahoma, Arial, sans-serif';
-  context.fillText(input.schoolName, 790, 532, 450);
+  context.font = '900 24px Tahoma, Arial, sans-serif';
+  context.fillText(input.schoolName, 790, 520, 450);
   return canvas;
 }
 
