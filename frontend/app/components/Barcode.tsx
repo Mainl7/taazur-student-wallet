@@ -104,142 +104,30 @@ async function buildCardCanvas(input: BarcodeProps) {
   if (!context) throw new Error('CANVAS_NOT_SUPPORTED');
   context.scale(scale, scale);
 
-  roundedRect(context, 0, 0, cardWidth, cardHeight, 42);
-  const background = context.createLinearGradient(0, 0, cardWidth, cardHeight);
-  background.addColorStop(0, '#16765b');
-  background.addColorStop(0.48, '#0b5a42');
-  background.addColorStop(1, '#03281f');
-  context.fillStyle = background;
-  context.fill();
-
+  const backgroundImage = await loadImage('/student-card-background.svg');
   context.save();
   roundedRect(context, 0, 0, cardWidth, cardHeight, 42);
   context.clip();
-  drawPattern(context);
-  const shade = context.createLinearGradient(0, 0, cardWidth, 0);
-  shade.addColorStop(0, 'rgba(255,255,255,.08)');
-  shade.addColorStop(0.48, 'rgba(255,255,255,0)');
-  shade.addColorStop(1, 'rgba(0,0,0,.18)');
-  context.fillStyle = shade;
-  context.fillRect(0, 0, cardWidth, cardHeight);
-  context.fillStyle = 'rgba(1,31,23,.42)';
-  context.beginPath();
-  context.moveTo(cardWidth, 0);
-  context.lineTo(760, 0);
-  context.lineTo(638, cardHeight);
-  context.lineTo(cardWidth, cardHeight);
-  context.closePath();
-  context.fill();
-
-  // The wide curved sweep is the defining shape of the approved reference.
-  context.fillStyle = 'rgba(18,108,82,.58)';
-  context.beginPath();
-  context.moveTo(104, -14);
-  context.bezierCurveTo(396, 8, 492, 166, 702, cardHeight + 18);
-  context.lineTo(570, cardHeight + 18);
-  context.bezierCurveTo(386, 306, 322, 138, -18, 84);
-  context.closePath();
-  context.fill();
-  context.fillStyle = 'rgba(1,39,30,.48)';
-  context.beginPath();
-  context.moveTo(130, 0);
-  context.bezierCurveTo(406, 28, 466, 176, 628, cardHeight);
-  context.lineTo(548, cardHeight);
-  context.bezierCurveTo(382, 294, 306, 146, -12, 98);
-  context.closePath();
-  context.fill();
-
-  context.strokeStyle = 'rgba(216,189,121,.92)';
-  context.lineWidth = 2.4;
-  context.beginPath();
-  context.moveTo(410, -20);
-  context.bezierCurveTo(190, 74, 170, 280, 562, cardHeight + 20);
-  context.stroke();
+  context.drawImage(backgroundImage, 0, 0, cardWidth, cardHeight);
   context.restore();
 
-  context.strokeStyle = '#c8a45b';
-  context.lineWidth = 4;
-  roundedRect(context, 12, 12, cardWidth - 24, cardHeight - 24, 34);
-  context.stroke();
-
-  context.save();
-  context.shadowColor = 'rgba(20,52,42,.16)';
-  context.shadowBlur = 22;
-  context.shadowOffsetY = 10;
-  roundedRect(context, 74, 266, 190, 190, 18);
-  context.fillStyle = '#ffffff';
-  context.fill();
-  context.shadowColor = 'transparent';
-  context.strokeStyle = '#d5b468';
-  context.lineWidth = 5;
-  context.stroke();
-  context.restore();
-
-  const qrUrl = await QRCode.toDataURL(input.value, { width: 160, margin: 1, errorCorrectionLevel: 'M' });
+  const qrUrl = await QRCode.toDataURL(input.value, { width: 132, margin: 1, errorCorrectionLevel: 'M' });
   const qrImage = await loadImage(qrUrl);
-  context.drawImage(qrImage, 89, 281, 160, 160);
-
-  context.direction = 'rtl';
-  context.textAlign = 'center';
-  context.fillStyle = '#d9bd79';
-  context.font = '900 24px Tahoma, Arial, sans-serif';
-  context.fillText('رمز البطاقة', 169, 498);
-
-  const logoImage = await loadImage('/student-card-logo.png');
-  const logoGlow = context.createRadialGradient(724, 122, 14, 724, 122, 116);
-  logoGlow.addColorStop(0, 'rgba(255,255,255,.13)');
-  logoGlow.addColorStop(1, 'rgba(255,255,255,0)');
-  context.fillStyle = logoGlow;
-  context.fillRect(590, 10, 260, 230);
-  context.globalAlpha = .94;
-  context.drawImage(logoImage, 650, 48, 150, 150);
-  context.globalAlpha = 1;
+  context.drawImage(qrImage, 52, 272, 132, 132);
 
   context.direction = 'rtl';
   context.textAlign = 'right';
   context.shadowColor = 'rgba(0,0,0,.32)';
   context.shadowBlur = 8;
   context.shadowOffsetY = 2;
-  context.fillStyle = '#d9bd79';
-  context.font = '900 30px Tahoma, Arial, sans-serif';
-  context.fillText('اسم الطالب', 790, 232);
   context.fillStyle = '#ffffff';
   context.font = '900 46px Tahoma, Arial, sans-serif';
   context.fillText(input.studentName, 790, 288, 390);
-
-  context.shadowBlur = 0;
-  context.strokeStyle = 'rgba(217,189,121,.9)';
-  context.lineWidth = 2;
-  context.beginPath();
-  context.moveTo(430, 316);
-  context.lineTo(790, 316);
-  context.stroke();
-  context.fillStyle = '#d9bd79';
-  drawDiamond(context, 802, 316, 10);
-
-  context.fillStyle = '#d9bd79';
-  context.font = '900 30px Tahoma, Arial, sans-serif';
-  context.fillText('رمز الطالب', 790, 360);
   context.fillStyle = '#ffffff';
   context.font = '900 40px Tahoma, Arial, sans-serif';
   context.direction = 'ltr';
   context.textAlign = 'right';
   context.fillText(input.studentCode, 790, 404, 330);
-
-  context.direction = 'rtl';
-  context.textAlign = 'right';
-  context.strokeStyle = 'rgba(217,189,121,.9)';
-  context.lineWidth = 2;
-  context.beginPath();
-  context.moveTo(430, 430);
-  context.lineTo(790, 430);
-  context.stroke();
-  context.fillStyle = '#d9bd79';
-  drawDiamond(context, 802, 430, 10);
-
-  context.fillStyle = '#d9bd79';
-  context.font = '900 28px Tahoma, Arial, sans-serif';
-  context.fillText('المدرسة', 790, 462);
   context.fillStyle = '#ffffff';
   context.font = '900 23px Tahoma, Arial, sans-serif';
   context.fillText(input.schoolName, 790, 500, 450);
@@ -319,15 +207,10 @@ export default function Barcode(props: BarcodeProps) {
   return (
     <div className="barcode-card" aria-label={`بطاقة الطالب ${studentName}`}>
       <div className="student-print-card">
-        <img className="student-card-logo" src="/student-card-logo.png" alt="" aria-hidden="true" />
+        <img className="student-card-background" src="/student-card-background.svg" alt="" aria-hidden="true" />
         <div className="student-card-info">
-          <small>اسم الطالب</small>
           <strong>{studentName}</strong>
-          <i />
-          <small>رمز الطالب</small>
           <b>{studentCode}</b>
-          <i />
-          <small>المدرسة</small>
           <span>{schoolName}</span>
         </div>
         <div className="student-card-qr">
