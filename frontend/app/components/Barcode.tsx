@@ -113,7 +113,7 @@ async function buildCardCanvas(input: BarcodeProps) {
 
   const qrUrl = await QRCode.toDataURL(input.value, { width: 132, margin: 1, errorCorrectionLevel: 'M' });
   const qrImage = await loadImage(qrUrl);
-  context.drawImage(qrImage, 52, 272, 132, 132);
+  context.drawImage(qrImage, 57, 278, 124, 124);
 
   context.direction = 'rtl';
   context.textAlign = 'right';
@@ -127,10 +127,10 @@ async function buildCardCanvas(input: BarcodeProps) {
   context.font = '900 40px Tahoma, Arial, sans-serif';
   context.direction = 'ltr';
   context.textAlign = 'right';
-  context.fillText(input.studentCode, 790, 404, 330);
+  context.fillText(input.studentCode, 790, 378, 330);
   context.fillStyle = '#ffffff';
-  context.font = '900 23px Tahoma, Arial, sans-serif';
-  context.fillText(input.schoolName, 790, 500, 450);
+  context.font = '900 22px Tahoma, Arial, sans-serif';
+  context.fillText(input.schoolName, 790, 463, 450);
   return canvas;
 }
 
