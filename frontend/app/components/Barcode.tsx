@@ -113,7 +113,7 @@ async function buildCardCanvas(input: BarcodeProps) {
 
   const qrUrl = await QRCode.toDataURL(input.value, { width: 132, margin: 1, errorCorrectionLevel: 'M' });
   const qrImage = await loadImage(qrUrl);
-  context.drawImage(qrImage, 57, 278, 124, 124);
+  context.drawImage(qrImage, 50, 271, 138, 138);
 
   context.direction = 'rtl';
   context.textAlign = 'right';
