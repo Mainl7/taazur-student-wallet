@@ -18,13 +18,18 @@ type Student = {
   cards: { publicToken: string }[];
 };
 
-type StudentSortKey = 'studentCode' | 'fullName' | 'schoolName' | 'grade';
+type StudentSearchKey = 'studentCode' | 'fullName' | 'schoolName' | 'grade';
+
+function normalizeSearch(value: string) {
+  return value.trim().toLocaleLowerCase('ar-SA').replace(/\s+/g, ' ');
+}
 
 export default function Students() {
   const [schools, setSchools] = useState<School[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [editing, setEditing] = useState<Student | null>(null);
-  const [sortBy, setSortBy] = useState<StudentSortKey>('fullName');
+  const [searchBy, setSearchBy] = useState<StudentSearchKey>('fullName');
+  const [searchText, setSearchText] = useState('');
   const [message, setMessage] = useState('');
 
   const load = async () => {
@@ -79,13 +84,16 @@ export default function Students() {
   }
 
   const activeSchools = schools.filter(school => !school.status || school.status === 'ACTIVE');
-  const sortedStudents = useMemo(() => {
+  const visibleStudents = useMemo(() => {
     const valueOf = (student: Student) => {
-      if (sortBy === 'schoolName') return student.school.name;
-      return student[sortBy];
+      if (searchBy === 'schoolName') return student.school.name;
+      return student[searchBy];
     };
-    return [...students].sort((a, b) => valueOf(a).localeCompare(valueOf(b), 'ar', { numeric: true, sensitivity: 'base' }));
-  }, [sortBy, students]);
+    const query = normalizeSearch(searchText);
+    return students
+      .filter(student => !query || normalizeSearch(valueOf(student)).includes(query))
+      .sort((a, b) => valueOf(a).localeCompare(valueOf(b), 'ar', { numeric: true, sensitivity: 'base' }));
+  }, [searchBy, searchText, students]);
 
   return (
     <AdminShell>
@@ -128,14 +136,20 @@ export default function Students() {
 
       <form className="entry student-tools">
         <label>
-          فرز الطلاب
-          <select value={sortBy} onChange={event => setSortBy(event.target.value as StudentSortKey)}>
+          البحث حسب
+          <select value={searchBy} onChange={event => setSearchBy(event.target.value as StudentSearchKey)}>
             <option value="studentCode">الرمز</option>
             <option value="fullName">اسم الطالب</option>
             <option value="schoolName">المدرسة</option>
             <option value="grade">الصف</option>
           </select>
         </label>
+        <label>
+          بحث الطلاب
+          <input value={searchText} onChange={event => setSearchText(event.target.value)} placeholder="اكتب كلمة البحث..." />
+        </label>
+        <button type="button" className="secondary" onClick={() => setSearchText('')}>مسح البحث</button>
+        <small className="form-note">النتائج: {visibleStudents.length} من {students.length}</small>
       </form>
 
       <table>
@@ -152,7 +166,7 @@ export default function Students() {
           </tr>
         </thead>
         <tbody>
-          {sortedStudents.map(student => {
+          {visibleStudents.map(student => {
             const token = student.cards[0]?.publicToken;
 
             return (
@@ -184,6 +198,7 @@ export default function Students() {
               </tr>
             );
           })}
+          {!visibleStudents.length && <tr><td colSpan={8}>لا توجد نتائج مطابقة للبحث.</td></tr>}
         </tbody>
       </table>
     </AdminShell>

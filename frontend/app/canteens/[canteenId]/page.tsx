@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
 import BrandLogo from '../../components/BrandLogo';
 import LogoutButton from '../../components/LogoutButton';
 import { apiFetch } from '../../lib/api';
@@ -41,7 +42,8 @@ type CanteenDetails = {
 
 const labels: Record<string, string> = { CREDIT: 'شحن', DEBIT: 'خصم', REFUND: 'استرجاع', REVERSAL: 'عكس', ADJUSTMENT: 'تسوية' };
 
-export default function CanteenDetailsPage({ params }: { params: { canteenId: string } }) {
+export default function CanteenDetailsPage() {
+  const params = useParams<{ canteenId: string }>();
   const [data, setData] = useState<CanteenDetails | null>(null);
   const [message, setMessage] = useState('جاري تحميل تفاصيل المقصف...');
 

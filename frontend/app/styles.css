@@ -36,7 +36,7 @@ p{line-height:1.8;color:var(--muted)}
 .panel a{margin-left:8px;margin-top:8px}
 .entry{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;padding:18px;border-radius:18px;margin-bottom:16px}
 .entry.students{grid-template-columns:repeat(6,1fr)}
-.entry.student-tools{grid-template-columns:minmax(220px,320px);justify-content:start}
+.entry.student-tools{grid-template-columns:minmax(180px,240px) minmax(260px,1fr) auto;align-items:end}
 label{color:var(--ink);font-weight:700}
 input,select{width:100%;padding:13px 14px;border:1px solid #cbdad2;border-radius:12px;background:#fbfdfc;color:var(--ink);outline:none;transition:.15s ease}
 input:focus,select:focus{border-color:var(--green-2);box-shadow:0 0 0 4px rgba(15,114,84,.12);background:#fff}

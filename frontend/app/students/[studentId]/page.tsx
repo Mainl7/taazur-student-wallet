@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useParams } from 'next/navigation';
 import AdminShell from '../../components/AdminShell';
 import { apiFetch } from '../../lib/api';
 
@@ -34,7 +35,8 @@ type StudentDetails = {
 
 const labels: Record<string, string> = { CREDIT: 'شحن', DEBIT: 'خصم', REFUND: 'استرجاع', REVERSAL: 'عكس', ADJUSTMENT: 'تسوية' };
 
-export default function StudentDetailsPage({ params }: { params: { studentId: string } }) {
+export default function StudentDetailsPage() {
+  const params = useParams<{ studentId: string }>();
   const [data, setData] = useState<StudentDetails | null>(null);
   const [message, setMessage] = useState('جاري تحميل ملف الطالب...');
 
