@@ -1,7 +1,7 @@
 :root{--green:#0b5a42;--green-2:#0f7254;--mint:#eaf5ef;--gold:#c8a45b;--ink:#14342a;--muted:#6d7d75;--line:#dce7e1;--card:#ffffff;--bg:#f4f8f5;--shadow:0 20px 50px rgba(20,52,42,.12)}
 *{box-sizing:border-box}
 html{background:var(--bg)}
-body{margin:0;background:radial-gradient(circle at 80% 0%,rgba(200,164,91,.18),transparent 34%),linear-gradient(135deg,#f7faf7 0%,#eef6f1 48%,#f8f5ec 100%);color:var(--ink);font-family:Tahoma,Arial,sans-serif}
+body{margin:0;background:radial-gradient(circle at 80% 0%,rgba(200,164,91,.18),transparent 34%),linear-gradient(135deg,#f7faf7 0%,#eef6f1 48%,#f8f5ec 100%);color:var(--ink);font-family:Tajawal,Tahoma,Arial,sans-serif}
 a{color:inherit}
 main{min-height:100vh;display:flex}
 aside{position:sticky;top:0;width:270px;height:100vh;background:linear-gradient(180deg,#0a4d39 0%,#0c6148 58%,#08432f 100%);color:#fff;padding:28px 22px;box-shadow:10px 0 40px rgba(8,67,47,.18)}
@@ -36,6 +36,7 @@ p{line-height:1.8;color:var(--muted)}
 .panel a{margin-left:8px;margin-top:8px}
 .entry{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;padding:18px;border-radius:18px;margin-bottom:16px}
 .entry.students{grid-template-columns:repeat(6,1fr)}
+.entry.student-tools{grid-template-columns:minmax(220px,320px);justify-content:start}
 label{color:var(--ink);font-weight:700}
 input,select{width:100%;padding:13px 14px;border:1px solid #cbdad2;border-radius:12px;background:#fbfdfc;color:var(--ink);outline:none;transition:.15s ease}
 input:focus,select:focus{border-color:var(--green-2);box-shadow:0 0 0 4px rgba(15,114,84,.12);background:#fff}
@@ -57,14 +58,16 @@ tbody tr:hover{background:#fbf8ef}
 .student-print-card:before,.student-print-card:after{display:none}
 .student-card-background{position:absolute;z-index:0;inset:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
 .student-card-info{position:absolute;z-index:2;inset:0;display:block;min-width:0;text-align:right;direction:rtl;text-shadow:0 2px 8px rgba(0,0,0,.3)}
-.student-card-info strong{position:absolute;top:24.7mm;right:6.2mm;max-width:47mm;color:#fff;font-size:14.5pt;line-height:1.08;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.student-card-info strong{position:absolute;top:24.7mm;right:6.2mm;max-width:47mm;color:#fff;font-size:var(--student-name-size,14.5pt);line-height:1.08;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .student-card-info b{position:absolute;top:32.9mm;right:6.2mm;color:#fff;font-size:11.8pt;line-height:1.05;font-weight:900;direction:ltr;text-align:right;white-space:nowrap}
 .student-card-info span{position:absolute;top:40.9mm;right:6.2mm;max-width:48mm;color:#fff;font-size:7.2pt;font-weight:900;line-height:1.12;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.student-card-qr{position:absolute;z-index:2;left:5mm;top:26.9mm;display:block;direction:rtl;background:transparent;border:0;border-radius:0;padding:0}
-.qr-code{display:block;width:13.8mm;height:13.8mm;border:0;border-radius:0;background:transparent;box-shadow:none}
+.student-card-qr{position:absolute;z-index:2;left:4.3mm;top:25.6mm;display:block;direction:rtl;background:transparent;border:0;border-radius:0;padding:0}
+.qr-code{display:block;width:17.4mm;height:17.4mm;border:0;border-radius:0;background:transparent;box-shadow:none}
 .student-card-qr span{display:none}
 .barcode-downloads{position:relative;z-index:2;display:flex;gap:6px;justify-content:center;flex-wrap:wrap}
 .barcode-downloads button{padding:7px 10px;font-size:11px;background:#fff;color:var(--green);border:1px solid rgba(216,189,121,.7);box-shadow:0 8px 18px rgba(20,52,42,.1)}
+.font-size-control{display:flex;align-items:center;gap:6px;width:100%;justify-content:center;color:var(--muted);font-size:11px;font-weight:800}
+.font-size-control input{width:72px;padding:7px 8px;border-radius:9px;text-align:center}
 [role=status],[role=alert]{display:block;background:#fff8e8;border:1px solid #eedaa4;color:#775a17;padding:12px 14px;border-radius:12px;margin:14px 0}
 .login,.pos{align-items:center;justify-content:center;padding:28px}
 .login:before,.pos:before{content:"";position:fixed;inset:0;background:linear-gradient(140deg,rgba(11,90,66,.12),transparent 42%),linear-gradient(320deg,rgba(200,164,91,.18),transparent 44%);pointer-events:none}
@@ -105,7 +108,8 @@ dl{display:grid;gap:8px;margin:0}dt{color:var(--muted);font-weight:800}dd{margin
 .alert-row.warn .alert-badge{background:#fff8e8;color:#8a640f}
 .empty-state{color:var(--muted)!important}
 .export-grid{display:grid;grid-template-columns:repeat(2,minmax(240px,1fr));gap:16px}
-.export-card{display:grid;gap:8px;text-decoration:none;color:var(--ink);transition:.18s ease}
+.export-card{display:grid;gap:8px;text-decoration:none;color:var(--ink);transition:.18s ease;text-align:right;cursor:pointer}
+button.export-card{background:rgba(255,255,255,.92);color:var(--ink);box-shadow:var(--shadow);font:inherit}
 .export-card:hover{transform:translateY(-2px);border-color:var(--green-2)}
 .export-card strong{color:var(--green);font-size:20px}.export-card span{color:var(--muted);line-height:1.7}
 .settlement-card p{color:var(--ink);margin:10px 0 14px}
@@ -158,4 +162,4 @@ td input[type=checkbox]{width:20px;height:20px;accent-color:var(--green)}
 @media(max-width:1000px){.cards{grid-template-columns:repeat(2,minmax(150px,1fr))}.entry,.entry.students{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:1000px){.report-grid,.alert-grid,.export-grid,.two-columns,.bulk-actions{grid-template-columns:1fr}.pos-summary{grid-template-columns:1fr}.dashboard-cards,.alert-summary{grid-template-columns:repeat(2,minmax(150px,1fr))}.chart-card{overflow-x:auto}.bar-item{min-width:80px}}
 @media(max-width:700px){main{display:block}aside{position:relative;width:auto;height:auto;padding:18px}.brand{min-height:124px}.brand img{max-height:112px}nav{grid-template-columns:repeat(2,1fr);margin-top:16px}nav a{justify-content:center;background:rgba(255,255,255,.1)}section{padding:18px}.management{padding:0}header{display:grid}.cards{grid-template-columns:1fr}.entry,.entry.students{grid-template-columns:1fr}table{display:block;overflow-x:auto;font-size:12px}th,td{padding:10px}.brand.compact img{width:176px;max-height:148px}.pos h1{font-size:28px}}
-@media print{body{background:#fff}aside,header,form,[role=status],button{display:none!important}section{padding:0}.management{max-width:none}table,thead,tbody,tr,td{display:block;border:0!important}th,td:not(:has(.student-print-card)){display:none!important}tr{break-inside:avoid;float:right;margin:0 0 4mm 4mm}.barcode-card{width:85.6mm;min-width:0;max-width:none}.student-print-card{width:85.6mm;height:54mm;min-width:0;box-shadow:none;border-radius:4mm;padding:0}.student-card-qr{top:26.9mm;left:5mm}.barcode-downloads{display:none!important}.token{white-space:normal}}
+@media print{body{background:#fff}aside,header,form,[role=status],button{display:none!important}section{padding:0}.management{max-width:none}table,thead,tbody,tr,td{display:block;border:0!important}th,td:not(:has(.student-print-card)){display:none!important}tr{break-inside:avoid;float:right;margin:0 0 4mm 4mm}.barcode-card{width:85.6mm;min-width:0;max-width:none}.student-print-card{width:85.6mm;height:54mm;min-width:0;box-shadow:none;border-radius:4mm;padding:0}.student-card-qr{top:25.6mm;left:4.3mm}.barcode-downloads{display:none!important}.token{white-space:normal}}

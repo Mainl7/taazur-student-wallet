@@ -1,6 +1,7 @@
 'use client';
 
 import QRCode from 'qrcode';
+import type { CSSProperties } from 'react';
 import { useEffect, useState } from 'react';
 
 type DownloadFormat = 'png' | 'jpeg' | 'pdf';
@@ -14,10 +15,15 @@ type BarcodeProps = {
   downloadable?: boolean;
 };
 
+type CardRenderInput = BarcodeProps & { nameFontSize: number };
+
 const cardWidth = 856;
 const cardHeight = 540;
 const pdfWidthPt = 85.6 * 2.8346456693;
 const pdfHeightPt = 54 * 2.8346456693;
+const defaultNameFontSize = 46;
+const minNameFontSize = 28;
+const maxNameFontSize = 54;
 
 function safeFileName(value: string) {
   return value
@@ -46,6 +52,11 @@ function loadImage(src: string) {
     image.onerror = () => reject(new Error('IMAGE_RENDER_FAILED'));
     image.src = src;
   });
+}
+
+function clampNameFontSize(value: number) {
+  if (!Number.isFinite(value)) return defaultNameFontSize;
+  return Math.min(maxNameFontSize, Math.max(minNameFontSize, Math.round(value)));
 }
 
 function roundedRect(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
@@ -95,7 +106,7 @@ function drawDiamond(context: CanvasRenderingContext2D, x: number, y: number, si
   context.fill();
 }
 
-async function buildCardCanvas(input: BarcodeProps) {
+async function buildCardCanvas(input: CardRenderInput) {
   const scale = 4;
   const canvas = document.createElement('canvas');
   canvas.width = cardWidth * scale;
@@ -111,9 +122,13 @@ async function buildCardCanvas(input: BarcodeProps) {
   context.drawImage(backgroundImage, 0, 0, cardWidth, cardHeight);
   context.restore();
 
-  const qrUrl = await QRCode.toDataURL(input.value, { width: 132, margin: 1, errorCorrectionLevel: 'M' });
+  if ('fonts' in document) {
+    await document.fonts.load(`900 ${input.nameFontSize}px Tajawal`);
+  }
+
+  const qrUrl = await QRCode.toDataURL(input.value, { width: 260, margin: 0, errorCorrectionLevel: 'M' });
   const qrImage = await loadImage(qrUrl);
-  context.drawImage(qrImage, 50, 271, 138, 138);
+  context.drawImage(qrImage, 43, 256, 174, 174);
 
   context.direction = 'rtl';
   context.textAlign = 'right';
@@ -121,7 +136,7 @@ async function buildCardCanvas(input: BarcodeProps) {
   context.shadowBlur = 8;
   context.shadowOffsetY = 2;
   context.fillStyle = '#ffffff';
-  context.font = '900 46px Tahoma, Arial, sans-serif';
+  context.font = `900 ${input.nameFontSize}px Tajawal, Tahoma, Arial, sans-serif`;
   context.fillText(input.studentName, 790, 288, 390);
   context.fillStyle = '#ffffff';
   context.font = '900 40px Tahoma, Arial, sans-serif';
@@ -177,10 +192,11 @@ function buildPdfFromJpeg(jpegDataUrl: string, imageWidth: number, imageHeight: 
 export default function Barcode(props: BarcodeProps) {
   const { value, studentName, studentCode, schoolName, fileName, downloadable = false } = props;
   const [qrUrl, setQrUrl] = useState('');
+  const [nameFontSize, setNameFontSize] = useState(defaultNameFontSize);
 
   useEffect(() => {
     let active = true;
-    void QRCode.toDataURL(value, { width: 250, margin: 1, errorCorrectionLevel: 'M' }).then(url => {
+    void QRCode.toDataURL(value, { width: 320, margin: 0, errorCorrectionLevel: 'M' }).then(url => {
       if (active) setQrUrl(url);
     });
     return () => { active = false; };
@@ -188,7 +204,7 @@ export default function Barcode(props: BarcodeProps) {
 
   const download = async (format: DownloadFormat) => {
     const baseName = safeFileName(fileName ?? `${studentCode}-${studentName}`);
-    const canvas = await buildCardCanvas(props);
+    const canvas = await buildCardCanvas({ ...props, nameFontSize: clampNameFontSize(nameFontSize) });
 
     if (format === 'png') {
       downloadBlob(await canvasToBlob(canvas, 'image/png'), `${baseName}.png`);
@@ -208,7 +224,7 @@ export default function Barcode(props: BarcodeProps) {
     <div className="barcode-card" aria-label={`بطاقة الطالب ${studentName}`}>
       <div className="student-print-card">
         <img className="student-card-background" src="/student-card-background.svg" alt="" aria-hidden="true" />
-        <div className="student-card-info">
+        <div className="student-card-info" style={{ '--student-name-size': `${(clampNameFontSize(nameFontSize) / 3.15).toFixed(1)}pt` } as CSSProperties}>
           <strong>{studentName}</strong>
           <b>{studentCode}</b>
           <span>{schoolName}</span>
@@ -223,6 +239,16 @@ export default function Barcode(props: BarcodeProps) {
           <button type="button" className="secondary" onClick={() => void download('png')}>PNG</button>
           <button type="button" className="secondary" onClick={() => void download('jpeg')}>JPEG</button>
           <button type="button" className="secondary" onClick={() => void download('pdf')}>PDF</button>
+          <label className="font-size-control">
+            حجم الاسم
+            <input
+              type="number"
+              min={minNameFontSize}
+              max={maxNameFontSize}
+              value={nameFontSize}
+              onChange={event => setNameFontSize(clampNameFontSize(Number(event.target.value)))}
+            />
+          </label>
         </div>
       )}
     </div>

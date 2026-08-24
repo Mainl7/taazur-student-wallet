@@ -23,8 +23,8 @@ const nextConfig: NextConfig = {
               "frame-ancestors 'none'",
               "object-src 'none'",
               "img-src 'self' data: blob:",
-              "font-src 'self' data:",
-              "style-src 'self' 'unsafe-inline'",
+              "font-src 'self' data: https://fonts.gstatic.com",
+              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "script-src 'self' 'unsafe-inline'",
               `connect-src ${connectSources.join(' ')}`,
               "upgrade-insecure-requests"

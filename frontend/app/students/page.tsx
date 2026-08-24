@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import AdminShell from '../components/AdminShell';
 import Barcode from '../components/Barcode';
 import { apiFetch } from '../lib/api';
@@ -18,10 +18,13 @@ type Student = {
   cards: { publicToken: string }[];
 };
 
+type StudentSortKey = 'studentCode' | 'fullName' | 'schoolName' | 'grade';
+
 export default function Students() {
   const [schools, setSchools] = useState<School[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [editing, setEditing] = useState<Student | null>(null);
+  const [sortBy, setSortBy] = useState<StudentSortKey>('fullName');
   const [message, setMessage] = useState('');
 
   const load = async () => {
@@ -76,6 +79,13 @@ export default function Students() {
   }
 
   const activeSchools = schools.filter(school => !school.status || school.status === 'ACTIVE');
+  const sortedStudents = useMemo(() => {
+    const valueOf = (student: Student) => {
+      if (sortBy === 'schoolName') return student.school.name;
+      return student[sortBy];
+    };
+    return [...students].sort((a, b) => valueOf(a).localeCompare(valueOf(b), 'ar', { numeric: true, sensitivity: 'base' }));
+  }, [sortBy, students]);
 
   return (
     <AdminShell>
@@ -116,6 +126,18 @@ export default function Students() {
 
       {message && <p role="status">{message}</p>}
 
+      <form className="entry student-tools">
+        <label>
+          فرز الطلاب
+          <select value={sortBy} onChange={event => setSortBy(event.target.value as StudentSortKey)}>
+            <option value="studentCode">الرمز</option>
+            <option value="fullName">اسم الطالب</option>
+            <option value="schoolName">المدرسة</option>
+            <option value="grade">الصف</option>
+          </select>
+        </label>
+      </form>
+
       <table>
         <thead>
           <tr>
@@ -130,7 +152,7 @@ export default function Students() {
           </tr>
         </thead>
         <tbody>
-          {students.map(student => {
+          {sortedStudents.map(student => {
             const token = student.cards[0]?.publicToken;
 
             return (
