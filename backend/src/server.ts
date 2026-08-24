@@ -384,14 +384,19 @@ app.get('/api/v1/canteens/:canteenId/details', auth, roles(Role.SUPER_ADMIN, Rol
     const canteenId = routeParam(req.params.canteenId);
     const summary = await canteenDueByCanteen(canteenId, req.claims!);
     const canteenSchoolId = summary.canteen.schoolId;
-    const [legacySettlement, activeSchoolCanteens] = await Promise.all([
+    const [lastSettlement, legacySettlement, activeSchoolCanteens] = await Promise.all([
+      prisma.canteenSettlement.findFirst({ where: { canteenId }, orderBy: { periodEnd: 'desc' } }),
       prisma.canteenSettlement.findFirst({ where: { canteenId: null, schoolId: canteenSchoolId }, orderBy: { periodEnd: 'desc' } }),
       prisma.canteen.count({ where: { schoolId: canteenSchoolId, status: EntityStatus.ACTIVE } })
     ]);
+    const legacyPeriodStart = new Date(Math.max(
+      lastSettlement?.periodEnd.getTime() ?? 0,
+      legacySettlement?.periodEnd.getTime() ?? 0
+    ));
     const transactionWhere: Prisma.WalletTransactionWhereInput = {
       OR: [
         { canteenId },
-        ...(activeSchoolCanteens === 1 ? [{ canteenId: null, schoolId: canteenSchoolId, createdAt: { gt: legacySettlement?.periodEnd ?? new Date(0) } }] : [])
+        ...(activeSchoolCanteens === 1 ? [{ canteenId: null, schoolId: canteenSchoolId, createdAt: { gt: legacyPeriodStart } }] : [])
       ]
     };
     const [transactions, settlements] = await Promise.all([
@@ -704,7 +709,7 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
       last7Transactions,
       topStudentGroups,
       topSchoolGroups,
-      canteenUsers
+      dashboardCanteens
     ] = await Promise.all([
       prisma.school.count({ where: schoolId ? { id: schoolId } : {} }),
       prisma.student.count({ where: { ...studentWhere, status: EntityStatus.ACTIVE } }),
@@ -727,7 +732,7 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
       prisma.walletTransaction.findMany({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: last7Start } }, select: { amount: true, createdAt: true } }),
       prisma.walletTransaction.groupBy({ by: ['studentId'], where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: periodStart } }, _sum: { amount: true }, _count: { id: true }, orderBy: { _count: { id: 'desc' } }, take: 5 }),
       prisma.walletTransaction.groupBy({ by: ['schoolId'], where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: periodStart } }, _sum: { amount: true }, _count: { id: true }, orderBy: { _count: { id: 'desc' } }, take: 5 }),
-      prisma.user.findMany({ where: { role: { in: [Role.CANTEEN_OPERATOR, Role.CANTEEN_OWNER] }, status: EntityStatus.ACTIVE, ...(schoolId ? { operatedCanteens: { some: { schoolId } } } : {}) }, select: { id: true } })
+      prisma.canteen.findMany({ where: { status: EntityStatus.ACTIVE, ...(schoolId ? { schoolId } : {}) }, select: { id: true } })
     ]);
 
     const dailyLimitMap = new Map(activeStudentRows.map(student => [student.id, { student, debit: 0, refund: 0 }]));
@@ -806,7 +811,7 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
     const [topStudentsData, topSchoolsData, canteenSummaries] = await Promise.all([
       prisma.student.findMany({ where: { id: { in: topStudentIds } }, select: { id: true, fullName: true, studentCode: true, school: { select: { name: true } } } }),
       prisma.school.findMany({ where: { id: { in: topSchoolIds } }, select: { id: true, name: true, schoolCode: true } }),
-      Promise.all(canteenUsers.map(user => canteenDueByUser(user.id, req.claims!)))
+      Promise.all(dashboardCanteens.map(canteen => canteenDueByCanteen(canteen.id, req.claims!)))
     ]);
     const topStudentMap = new Map(topStudentsData.map(student => [student.id, student]));
     const topSchoolMap = new Map(topSchoolsData.map(school => [school.id, school]));
@@ -1340,7 +1345,10 @@ async function canteenDueByCanteen(canteenId: string, claims: Claims) {
     prisma.canteen.count({ where: { schoolId: canteen.schoolId, status: EntityStatus.ACTIVE } })
   ]);
   const periodStart = lastSettlement?.periodEnd ?? new Date(0);
-  const legacyPeriodStart = legacySettlement?.periodEnd ?? new Date(0);
+  const legacyPeriodStart = new Date(Math.max(
+    periodStart.getTime(),
+    legacySettlement?.periodEnd.getTime() ?? 0
+  ));
   const transactionWhere: Prisma.WalletTransactionWhereInput = {
     type: { in: [TransactionType.DEBIT, TransactionType.REFUND] },
     OR: [
