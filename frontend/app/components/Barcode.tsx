@@ -24,6 +24,7 @@ const pdfHeightPt = 54 * 2.8346456693;
 const defaultNameFontSize = 46;
 const minNameFontSize = 28;
 const maxNameFontSize = 54;
+const cardBackgroundPath = '/student-card-background.png';
 
 function safeFileName(value: string) {
   return value
@@ -115,7 +116,7 @@ async function buildCardCanvas(input: CardRenderInput) {
   if (!context) throw new Error('CANVAS_NOT_SUPPORTED');
   context.scale(scale, scale);
 
-  const backgroundImage = await loadImage('/student-card-background.svg');
+  const backgroundImage = await loadImage(cardBackgroundPath);
   context.save();
   roundedRect(context, 0, 0, cardWidth, cardHeight, 42);
   context.clip();
@@ -126,9 +127,9 @@ async function buildCardCanvas(input: CardRenderInput) {
     await document.fonts.load(`900 ${input.nameFontSize}px Tajawal`);
   }
 
-  const qrUrl = await QRCode.toDataURL(input.value, { width: 260, margin: 0, errorCorrectionLevel: 'M' });
+  const qrUrl = await QRCode.toDataURL(input.value, { width: 512, margin: 3, errorCorrectionLevel: 'M' });
   const qrImage = await loadImage(qrUrl);
-  context.drawImage(qrImage, 43, 256, 174, 174);
+  context.drawImage(qrImage, 40, 231, 172, 172);
 
   context.direction = 'rtl';
   context.textAlign = 'right';
@@ -196,7 +197,7 @@ export default function Barcode(props: BarcodeProps) {
 
   useEffect(() => {
     let active = true;
-    void QRCode.toDataURL(value, { width: 320, margin: 0, errorCorrectionLevel: 'M' }).then(url => {
+    void QRCode.toDataURL(value, { width: 512, margin: 3, errorCorrectionLevel: 'M' }).then(url => {
       if (active) setQrUrl(url);
     });
     return () => { active = false; };
@@ -223,7 +224,7 @@ export default function Barcode(props: BarcodeProps) {
   return (
     <div className="barcode-card" aria-label={`بطاقة الطالب ${studentName}`}>
       <div className="student-print-card">
-        <img className="student-card-background" src="/student-card-background.svg" alt="" aria-hidden="true" />
+        <img className="student-card-background" src={cardBackgroundPath} alt="" aria-hidden="true" />
         <div className="student-card-info" style={{ '--student-name-size': `${(clampNameFontSize(nameFontSize) / 3.15).toFixed(1)}pt` } as CSSProperties}>
           <strong>{studentName}</strong>
           <b>{studentCode}</b>
