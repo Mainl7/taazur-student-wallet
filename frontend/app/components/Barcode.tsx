@@ -127,9 +127,9 @@ async function buildCardCanvas(input: CardRenderInput) {
     await document.fonts.load(`900 ${input.nameFontSize}px Tajawal`);
   }
 
-  const qrUrl = await QRCode.toDataURL(input.value, { width: 512, margin: 3, errorCorrectionLevel: 'M' });
+  const qrUrl = await QRCode.toDataURL(input.value, { width: 512, margin: 2, errorCorrectionLevel: 'M' });
   const qrImage = await loadImage(qrUrl);
-  context.drawImage(qrImage, 40, 231, 172, 172);
+  context.drawImage(qrImage, 28, 219, 196, 196);
 
   context.direction = 'rtl';
   context.textAlign = 'right';
@@ -197,7 +197,7 @@ export default function Barcode(props: BarcodeProps) {
 
   useEffect(() => {
     let active = true;
-    void QRCode.toDataURL(value, { width: 512, margin: 3, errorCorrectionLevel: 'M' }).then(url => {
+    void QRCode.toDataURL(value, { width: 512, margin: 2, errorCorrectionLevel: 'M' }).then(url => {
       if (active) setQrUrl(url);
     });
     return () => { active = false; };
