@@ -137,7 +137,8 @@ button.export-card{background:rgba(255,255,255,.92);color:var(--ink);box-shadow:
 .dashboard-hero{align-items:flex-start}
 .dashboard-hero strong{display:block;margin-bottom:6px}
 .dashboard-filters{display:flex;gap:12px;flex-wrap:wrap;align-items:end}
-.dashboard-filters label{min-width:180px}
+.dashboard-filters label{min-width:170px}
+.dashboard-filters input[type="date"]{min-height:38px}
 .dashboard-section{display:block;min-height:0;flex:none;padding:0;margin:0 0 24px}
 .section-title{display:flex;align-items:end;justify-content:space-between;gap:12px;margin:0 0 14px}
 .section-title h2{margin:0}.section-title span{color:var(--muted);font-weight:700}.section-title.compact{align-items:center;margin-bottom:10px}

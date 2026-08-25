@@ -77,6 +77,30 @@ const startOfThisMonth = () => {
   date.setHours(0, 0, 0, 0);
   return date;
 };
+const dayMs = 24 * 60 * 60 * 1000;
+const parseLocalDate = (value: unknown) => {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
+  const [year, monthNumber, day] = value.split('-').map(Number);
+  const date = new Date(year, monthNumber - 1, day);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return date;
+};
+const parseDashboardPeriod = (query: Record<string, unknown>) => {
+  const today = startOfToday();
+  const week = daysAgo(6);
+  const month = startOfThisMonth();
+  const period = typeof query.period === 'string' && ['today', 'week', 'month', 'custom'].includes(query.period) ? query.period : 'today';
+  if (period === 'custom') {
+    const start = parseLocalDate(query.startDate);
+    const endDay = parseLocalDate(query.endDate);
+    if (start && endDay) {
+      const end = new Date(endDay.getTime() + dayMs);
+      if (end > start) return { period, start, end };
+    }
+    return { period: 'today', start: today, end: undefined };
+  }
+  return { period, start: period === 'month' ? month : period === 'week' ? week : today, end: undefined };
+};
 const parseMonthRange = (month?: unknown) => {
   const text = typeof month === 'string' && /^\d{4}-\d{2}$/.test(month) ? month : new Date().toISOString().slice(0, 7);
   const [year, monthNumber] = text.split('-').map(Number);
@@ -679,8 +703,10 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
     const today = startOfToday();
     const week = daysAgo(6);
     const month = startOfThisMonth();
-    const period = typeof req.query.period === 'string' && ['today', 'week', 'month'].includes(req.query.period) ? req.query.period : 'today';
-    const periodStart = period === 'month' ? month : period === 'week' ? week : today;
+    const dashboardPeriod = parseDashboardPeriod(req.query as Record<string, unknown>);
+    const period = dashboardPeriod.period;
+    const periodStart = dashboardPeriod.start;
+    const periodDateFilter: Prisma.DateTimeFilter = dashboardPeriod.end ? { gte: periodStart, lt: dashboardPeriod.end } : { gte: periodStart };
     const last7Start = daysAgo(6);
     const last7Days = Array.from({ length: 7 }, (_, index) => {
       const date = daysAgo(6 - index);
@@ -715,11 +741,11 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
       prisma.student.count({ where: { ...studentWhere, status: EntityStatus.ACTIVE } }),
       prisma.wallet.aggregate({ where: walletWhere, _sum: { balance: true } }),
       prisma.walletTransaction.count({ where: { ...transactionWhere, createdAt: { gte: today } } }),
-      prisma.walletTransaction.count({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: periodStart } } }),
+      prisma.walletTransaction.count({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: periodDateFilter } }),
       prisma.walletTransaction.aggregate({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: today } }, _sum: { amount: true } }),
       prisma.walletTransaction.aggregate({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: week } }, _sum: { amount: true } }),
       prisma.walletTransaction.aggregate({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: month } }, _sum: { amount: true } }),
-      prisma.walletTransaction.aggregate({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: periodStart } }, _sum: { amount: true } }),
+      prisma.walletTransaction.aggregate({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: periodDateFilter }, _sum: { amount: true } }),
       prisma.card.count({ where: { status: 'REVOKED', ...(schoolId ? { student: { schoolId } } : {}) } }),
       prisma.wallet.findMany({ where: { balance: { lt: 10 }, student: { ...studentWhere, status: EntityStatus.ACTIVE } }, include: { student: { select: { id: true, fullName: true, studentCode: true, school: { select: { name: true } } } } }, take: 5, orderBy: { balance: 'asc' } }),
       prisma.wallet.count({ where: { balance: { lt: 10 }, student: { ...studentWhere, status: EntityStatus.ACTIVE } } }),
@@ -730,8 +756,8 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
       prisma.loginAttempt.count({ where: { failedCount: { gte: 3 } } }),
       prisma.walletTransaction.groupBy({ by: ['performedById', 'schoolId'], where: { ...transactionWhere, type: TransactionType.REFUND, createdAt: { gte: daysAgo(7) } }, _count: { id: true } }),
       prisma.walletTransaction.findMany({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: last7Start } }, select: { amount: true, createdAt: true } }),
-      prisma.walletTransaction.groupBy({ by: ['studentId'], where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: periodStart } }, _sum: { amount: true }, _count: { id: true }, orderBy: { _count: { id: 'desc' } }, take: 5 }),
-      prisma.walletTransaction.groupBy({ by: ['schoolId'], where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: periodStart } }, _sum: { amount: true }, _count: { id: true }, orderBy: { _count: { id: 'desc' } }, take: 5 }),
+      prisma.walletTransaction.groupBy({ by: ['studentId'], where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: periodDateFilter }, _sum: { amount: true }, _count: { id: true }, orderBy: { _count: { id: 'desc' } }, take: 5 }),
+      prisma.walletTransaction.groupBy({ by: ['schoolId'], where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: periodDateFilter }, _sum: { amount: true }, _count: { id: true }, orderBy: { _count: { id: 'desc' } }, take: 5 }),
       prisma.canteen.findMany({ where: { status: EntityStatus.ACTIVE, ...(schoolId ? { schoolId } : {}) }, select: { id: true } })
     ]);
 
@@ -830,7 +856,12 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
       periodSpent: asMoney(periodSpent._sum.amount),
       revokedCards,
       alertsCount,
-      filter: { period, schoolId: schoolId ?? null },
+      filter: {
+        period,
+        schoolId: schoolId ?? null,
+        startDate: periodStart.toISOString().slice(0, 10),
+        endDate: dashboardPeriod.end ? new Date(dashboardPeriod.end.getTime() - 1).toISOString().slice(0, 10) : null
+      },
       spendingByDay: spendingByDay.map(item => ({ ...item, amount: asMoney(item.amount), percentage: Math.round((item.amount / maxDailySpend) * 100) })),
       topStudents: topStudentGroups.map(group => {
         const student = topStudentMap.get(group.studentId);

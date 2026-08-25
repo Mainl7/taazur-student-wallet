@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import AdminShell from './components/AdminShell';
 import { apiFetch } from './lib/api';
 
-type Period = 'today' | 'week' | 'month';
+type Period = 'today' | 'week' | 'month' | 'custom';
 type School = { id: string; name: string; schoolCode: string };
 type DaySpend = { date: string; amount: string; count: number; percentage: number };
 type RankedStudent = { studentId: string; fullName: string; studentCode: string; schoolName: string; count: number; amount: string };
@@ -36,17 +36,24 @@ type Dashboard = {
   canteen: { unsettledTotal: string; canteensWithDue: number };
 };
 
-const periodLabels: Record<Period, string> = { today: 'اليوم', week: 'الأسبوع', month: 'الشهر' };
+const periodLabels: Record<Period, string> = { today: 'اليوم', week: 'الأسبوع', month: 'الشهر', custom: 'الفترة المختارة' };
+const todayInputValue = () => new Date().toISOString().slice(0, 10);
 
 export default function DashboardPage() {
   const [data, setData] = useState<Dashboard | null>(null);
   const [schools, setSchools] = useState<School[]>([]);
   const [period, setPeriod] = useState<Period>('today');
   const [schoolId, setSchoolId] = useState('');
+  const [startDate, setStartDate] = useState(todayInputValue);
+  const [endDate, setEndDate] = useState(todayInputValue);
   const [message, setMessage] = useState('');
 
-  const load = async (nextPeriod = period, nextSchoolId = schoolId) => {
-    const query = new URLSearchParams({ period: nextPeriod, ...(nextSchoolId ? { schoolId: nextSchoolId } : {}) });
+  const load = async (nextPeriod = period, nextSchoolId = schoolId, nextStartDate = startDate, nextEndDate = endDate) => {
+    const query = new URLSearchParams({
+      period: nextPeriod,
+      ...(nextSchoolId ? { schoolId: nextSchoolId } : {}),
+      ...(nextPeriod === 'custom' ? { startDate: nextStartDate, endDate: nextEndDate } : {})
+    });
     const [dashboardResponse, schoolsResponse] = await Promise.all([
       apiFetch(`/dashboard?${query}`),
       apiFetch('/schools')
@@ -61,7 +68,7 @@ export default function DashboardPage() {
     setMessage('');
   };
 
-  useEffect(() => { void load('today', ''); }, []);
+  useEffect(() => { void load('today', '', startDate, endDate); }, []);
 
   const selectedSchoolName = useMemo(() => schools.find(school => school.id === schoolId)?.name ?? 'كل المدارس', [schoolId, schools]);
   const stats = data ? [
@@ -76,12 +83,22 @@ export default function DashboardPage() {
 
   function changePeriod(nextPeriod: Period) {
     setPeriod(nextPeriod);
-    void load(nextPeriod, schoolId);
+    void load(nextPeriod, schoolId, startDate, endDate);
   }
 
   function changeSchool(nextSchoolId: string) {
     setSchoolId(nextSchoolId);
-    void load(period, nextSchoolId);
+    void load(period, nextSchoolId, startDate, endDate);
+  }
+
+  function changeStartDate(nextStartDate: string) {
+    setStartDate(nextStartDate);
+    if (period === 'custom') void load(period, schoolId, nextStartDate, endDate);
+  }
+
+  function changeEndDate(nextEndDate: string) {
+    setEndDate(nextEndDate);
+    if (period === 'custom') void load(period, schoolId, startDate, nextEndDate);
   }
 
   return (
@@ -97,8 +114,17 @@ export default function DashboardPage() {
               <option value="today">اليوم</option>
               <option value="week">الأسبوع</option>
               <option value="month">الشهر</option>
+              <option value="custom">فترة مخصصة</option>
             </select>
           </label>
+          {period === 'custom' && <>
+            <label>من تاريخ
+              <input type="date" value={startDate} max={endDate} onChange={event => changeStartDate(event.target.value)} />
+            </label>
+            <label>إلى تاريخ
+              <input type="date" value={endDate} min={startDate} onChange={event => changeEndDate(event.target.value)} />
+            </label>
+          </>}
           <label>المدرسة
             <select value={schoolId} onChange={event => changeSchool(event.target.value)}>
               <option value="">كل المدارس</option>
