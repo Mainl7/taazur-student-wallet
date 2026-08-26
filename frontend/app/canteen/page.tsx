@@ -95,7 +95,7 @@ export default function Canteen() {
     if (response.status === 401) return location.assign('/login');
     if (!response.ok) return setNotice({ tone: 'error', text: `تعذر قراءة البطاقة: ${data.error ?? 'UNKNOWN_ERROR'}` });
     setLookup(data.student ?? null);
-    setNotice({ tone: 'info', text: `تم التعرف على الطالب: ${data.student?.fullName}. راجع البيانات ثم أدخل مبلغ الخصم.` });
+    setNotice({ tone: 'info', text: `تم التعرف على الطالب: ${data.student?.fullName}. راجع البيانات ثم أدخل مبلغ الفسحة.` });
     amountInput.current?.focus();
   }
 
@@ -169,7 +169,7 @@ export default function Canteen() {
     form.reset();
     setLookup(null);
     cardInput.current?.focus();
-    setNotice({ tone: 'success', text: `تم الخصم بنجاح من ${data.transaction?.student?.fullName ?? 'الطالب'}: ${data.transaction!.amount} ر.س — الرصيد المتبقي: ${data.transaction!.balanceAfter} ر.س — رقم العملية: ${data.transaction!.reference}` });
+    setNotice({ tone: 'success', text: `تم صرف مبلغ الفسحة بنجاح من ${data.transaction?.student?.fullName ?? 'الطالب'}: ${data.transaction!.amount} ر.س — رصيد الفسحة المتبقي: ${data.transaction!.balanceAfter} ر.س — رقم العملية: ${data.transaction!.reference}` });
     void loadSummary();
   }
 
@@ -186,7 +186,7 @@ export default function Canteen() {
 
     cardInput.current?.focus();
     setLastTransaction(null);
-    setNotice({ tone: 'success', text: `${data.replayed ? 'سبق استرجاع العملية' : 'تم الاسترجاع بنجاح'}: ${data.transaction!.amount} ر.س — الرصيد بعد الاسترجاع: ${data.transaction!.balanceAfter} ر.س` });
+    setNotice({ tone: 'success', text: `${data.replayed ? 'سبق استرجاع العملية' : 'تم الاسترجاع بنجاح'}: ${data.transaction!.amount} ر.س — رصيد الفسحة بعد الاسترجاع: ${data.transaction!.balanceAfter} ر.س` });
     void loadSummary();
   }
 
@@ -211,8 +211,8 @@ export default function Canteen() {
       {authorized && (
         <>
           <div className="pos-summary">
-            <article><small>مستحق المقصف الحالي</small><strong>{summary?.net ?? '0.00'} ر.س</strong></article>
-            <article><small>إجمالي الخصومات</small><strong>{summary?.debit ?? '0.00'} ر.س</strong></article>
+            <article><small>مستحق المقصف على الجمعية</small><strong>{summary?.net ?? '0.00'} ر.س</strong></article>
+            <article><small>إجمالي مصروفات الفسحة</small><strong>{summary?.debit ?? '0.00'} ر.س</strong></article>
             <article><small>إجمالي الاسترجاع</small><strong>{summary?.refund ?? '0.00'} ر.س</strong></article>
           </div>
 
@@ -233,9 +233,9 @@ export default function Canteen() {
               {scanning && <button type="button" className="secondary" onClick={stopCamera}>إيقاف الكاميرا</button>}
             </div>
             <video ref={video} className="scanner-preview" muted playsInline autoPlay hidden={!scanning} />
-            {lookup && <div className="student-preview"><strong>{lookup.fullName}</strong><span>{lookup.schoolName} — {lookup.studentCode}</span><span>الرصيد: {lookup.balance} ر.س — المتبقي من الحد اليومي: {lookup.todayRemaining} ر.س</span></div>}
+            {lookup && <div className="student-preview"><strong>{lookup.fullName}</strong><span>{lookup.schoolName} — {lookup.studentCode}</span><span>رصيد الفسحة: {lookup.balance} ر.س — المتبقي من الحد اليومي: {lookup.todayRemaining} ر.س</span></div>}
             <label>قيمة العملية (ر.س)<input ref={amountInput} name="amount" required type="number" min="0.01" step="0.01" /></label>
-            <button>تأكيد الخصم</button>
+            <button>تأكيد صرف الفسحة</button>
             {lastTransaction && <button type="button" className="danger-button" onClick={() => void refundByReference(lastTransaction.reference)}>استرجاع آخر عملية: {lastTransaction.amount} ر.س</button>}
           </form>
           <form onSubmit={refund}>

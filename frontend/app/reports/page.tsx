@@ -55,7 +55,7 @@ export default function ReportsPage() {
       </div>
 
       <h2>عمليات المقصف حسب اليوم</h2>
-      <table><thead><tr><th>اليوم</th><th>الخصومات</th><th>الاسترجاع</th><th>الصافي</th><th>عدد عمليات الخصم</th></tr></thead><tbody>{report?.canteenByDay.map(day => <tr key={day.date}><td>{day.date}</td><td>{day.debit} ر.س</td><td>{day.refund} ر.س</td><td>{day.net} ر.س</td><td>{day.count}</td></tr>)}</tbody></table>
+      <table><thead><tr><th>اليوم</th><th>مصروفات الفسحة</th><th>الاسترجاع</th><th>الصافي</th><th>عدد عمليات الفسحة</th></tr></thead><tbody>{report?.canteenByDay.map(day => <tr key={day.date}><td>{day.date}</td><td>{day.debit} ر.س</td><td>{day.refund} ر.س</td><td>{day.net} ر.س</td><td>{day.count}</td></tr>)}</tbody></table>
 
       <h2>استخدام الطلاب حسب المدرسة</h2>
       <table><thead><tr><th>المدرسة</th><th>الطالب</th><th>اليوم</th><th>الأسبوع</th><th>الشهر</th><th>مصروف الشهر</th></tr></thead><tbody>{report?.studentUsage.map(item => <tr key={item.studentId}><td>{item.schoolName}</td><td>{item.fullName} — {item.studentCode}</td><td>{item.dailyCount}</td><td>{item.weeklyCount}</td><td>{item.monthlyCount}</td><td>{item.monthlyAmount} ر.س</td></tr>)}</tbody></table>

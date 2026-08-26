@@ -85,7 +85,7 @@ export default function ExportsPage() {
       {message && <p role="status">{message}</p>}
       <div className="export-grid">
         <button type="button" className="export-card" disabled={!!exporting} onClick={() => void exportFile(`/exports/monthly-expenses.xls?${query}`, 'تقرير Excel')}>
-          <strong>تقرير شهري Excel</strong><span>مصروفات الطلاب جاهزة للفتح في Excel والطباعة.</span>
+          <strong>تقرير شهري Excel</strong><span>مصروفات الفسحة للطلاب جاهزة للفتح في Excel والطباعة.</span>
         </button>
         <button type="button" className="export-card" disabled={!!exporting} onClick={() => void exportFile(`/exports/monthly-expenses-print?${query}`, 'تقرير PDF', true)}>
           <strong>تقرير شهري PDF</strong><span>يفتح تقرير طباعة؛ اختر طباعة ثم حفظ كـ PDF.</span>
@@ -94,7 +94,7 @@ export default function ExportsPage() {
           <strong>{exporting === 'تصدير العمليات' ? 'جاري تجهيز العمليات...' : 'تصدير العمليات'}</strong><span>كل عمليات الشهر المحدد بصيغة CSV.</span>
         </button>
         <button type="button" className="export-card" disabled={!!exporting} onClick={() => void exportFile(`/exports/students.csv${schoolQuery}`, 'تصدير الطلاب')}>
-          <strong>{exporting === 'تصدير الطلاب' ? 'جاري تجهيز الطلاب...' : 'تصدير الطلاب'}</strong><span>بيانات الطلاب والرصيد ورمز البطاقة النشطة.</span>
+          <strong>{exporting === 'تصدير الطلاب' ? 'جاري تجهيز الطلاب...' : 'تصدير الطلاب'}</strong><span>بيانات الطلاب ورصيد الفسحة ورمز البطاقة النشطة.</span>
         </button>
       </div>
     </AdminShell>

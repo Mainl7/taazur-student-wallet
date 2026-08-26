@@ -6,7 +6,7 @@ import { apiFetch } from '../lib/api';
 
 type Transaction = { id: string; studentId: string; reference: string; amount: string; type: 'CREDIT' | 'DEBIT' | 'REFUND' | 'REVERSAL' | 'ADJUSTMENT'; balanceBefore: string; balanceAfter: string; createdAt: string; school: { name: string }; student?: { fullName: string; studentCode: string }; performedBy: { email: string } };
 type Totals = { type: string; _sum: { amount: string | null } };
-const labels: Record<string, string> = { CREDIT: 'شحن', DEBIT: 'خصم', REFUND: 'استرجاع', REVERSAL: 'عكس', ADJUSTMENT: 'تعديل' };
+const labels: Record<string, string> = { CREDIT: 'تخصيص فسحة', DEBIT: 'صرف مقصف', REFUND: 'استرجاع', REVERSAL: 'عكس', ADJUSTMENT: 'تعديل' };
 
 export default function Transactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -31,14 +31,14 @@ export default function Transactions() {
   useEffect(() => { void load(''); }, []);
 
   async function refund(transaction: Transaction) {
-    if (!confirm(`استرجاع عملية خصم ${transaction.amount} ر.س للطالب ${transaction.student?.fullName ?? transaction.studentId}؟`)) return;
+    if (!confirm(`استرجاع عملية صرف فسحة ${transaction.amount} ر.س للطالب ${transaction.student?.fullName ?? transaction.studentId}؟`)) return;
 
     const response = await apiFetch(`/transactions/${transaction.id}/refund`, { method: 'POST' });
     const data: { error?: string } = await response.json();
 
     if (!response.ok) return setMessage(`تعذر الاسترجاع: ${data.error ?? 'UNKNOWN_ERROR'}`);
 
-    setMessage('تم استرجاع العملية وإعادة المبلغ للمحفظة.');
+    setMessage('تم استرجاع العملية وإعادة المبلغ لرصيد الفسحة.');
     void load();
   }
 
@@ -50,10 +50,10 @@ export default function Transactions() {
 
   return (
     <AdminShell>
-      <header><div><h1>سجل العمليات</h1><a href="/wallets">← شحن المحافظ</a> <a href="/audit-logs">سجل التدقيق ←</a></div></header>
+      <header><div><h1>سجل العمليات</h1><a href="/wallets">← تخصيص مبالغ الفسحة</a> <a href="/audit-logs">سجل التدقيق ←</a></div></header>
       <div className="report-tools">
         <label>نوع العملية<select value={filter} onChange={event => { setFilter(event.target.value); void load(event.target.value); }}>
-          <option value="">الكل</option><option value="CREDIT">شحن</option><option value="DEBIT">خصم</option><option value="REFUND">استرجاع</option>
+          <option value="">الكل</option><option value="CREDIT">تخصيص فسحة</option><option value="DEBIT">صرف مقصف</option><option value="REFUND">استرجاع</option>
         </select></label>
         <strong>{totalText}</strong>
       </div>

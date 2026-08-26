@@ -66,10 +66,10 @@ export default function Wallets() {
       body: JSON.stringify(Object.fromEntries(new FormData(form)))
     });
 
-    if (!response.ok) return setMessage('تعذر شحن المحفظة.');
+    if (!response.ok) return setMessage('تعذر تخصيص مبلغ الفسحة.');
 
     form.reset();
-    setMessage('تم شحن المحفظة وتسجيل العملية في دفتر الأستاذ.');
+    setMessage('تم تخصيص مبلغ الفسحة من الجمعية وتسجيل العملية في دفتر الأستاذ.');
     void load();
   }
 
@@ -80,7 +80,7 @@ export default function Wallets() {
 
     if (!selectedSchoolId) return setMessage('اختر المدرسة أولًا.');
     if (mode === 'selected' && selectedStudentIds.length === 0) return setMessage('حدد طالبًا واحدًا على الأقل.');
-    if (mode === 'school' && !confirm(`سيتم شحن ${schoolStudents.length} طالب/طالبة في ${selectedSchool?.name ?? 'المدرسة المختارة'}. هل أنت متأكد؟`)) return;
+    if (mode === 'school' && !confirm(`سيتم تخصيص مبلغ فسحة لـ ${schoolStudents.length} طالب/طالبة في ${selectedSchool?.name ?? 'المدرسة المختارة'}. هل أنت متأكد؟`)) return;
 
     const response = await apiFetch('/wallets/bulk-top-up', {
       method: 'POST',
@@ -93,11 +93,11 @@ export default function Wallets() {
     });
     const data: BulkResponse = await response.json();
 
-    if (!response.ok) return setMessage(`تعذر الشحن الجماعي: ${data.error ?? 'UNKNOWN_ERROR'}`);
+    if (!response.ok) return setMessage(`تعذر التخصيص الجماعي: ${data.error ?? 'UNKNOWN_ERROR'}`);
 
     form.reset();
     setSelectedStudentIds([]);
-    setMessage(`تم شحن ${data.batch!.count} طالب/طالبة — إجمالي الشحن ${data.batch!.totalAmount} ر.س.`);
+    setMessage(`تم تخصيص مبلغ فسحة لـ ${data.batch!.count} طالب/طالبة — إجمالي المخصص ${data.batch!.totalAmount} ر.س.`);
     void load();
   }
 
@@ -112,15 +112,15 @@ export default function Wallets() {
     <AdminShell>
       <header>
         <div>
-          <h1>شحن المحافظ</h1>
-          <span>شحن فردي أو جماعي حسب المدرسة والطلاب المحددين</span>
+          <h1>تخصيص مبالغ الفسحة</h1>
+          <span>اعتماد مبالغ الفسحة من الجمعية لطالب واحد أو مجموعة طلاب</span>
         </div>
         <a href="/transactions">سجل العمليات ←</a>
       </header>
 
       <section className="dashboard-section">
         <div className="section-title compact">
-          <h2>شحن طالب واحد</h2>
+          <h2>تخصيص لطالب واحد</h2>
           <span>مناسب للحالات السريعة</span>
         </div>
         <form className="entry" onSubmit={submitSingle}>
@@ -128,14 +128,14 @@ export default function Wallets() {
             <option value="" disabled>اختر الطالب</option>
             {students.map(student => <option key={student.id} value={student.id}>{student.fullName} — {student.studentCode} — {student.school.name}</option>)}
           </select>
-          <input name="amount" type="number" min="0.01" step="0.01" placeholder="قيمة الشحن بالريال" required />
-          <button>شحن الرصيد</button>
+          <input name="amount" type="number" min="0.01" step="0.01" placeholder="قيمة مخصص الفسحة بالريال" required />
+          <button>اعتماد المبلغ</button>
         </form>
       </section>
 
       <section className="dashboard-section">
         <div className="section-title compact">
-          <h2>الشحن الجماعي</h2>
+          <h2>التخصيص الجماعي</h2>
           <span>اختر مدرسة كاملة أو طلابًا محددين من المدرسة</span>
         </div>
 
@@ -150,13 +150,13 @@ export default function Wallets() {
 
           <div className="bulk-actions">
             <form className="mini-form" onSubmit={event => void submitBulk(event, 'school')}>
-              <input name="amount" type="number" min="0.01" step="0.01" placeholder="مبلغ لكل طالب" required />
-              <button disabled={!selectedSchoolId || schoolStudents.length === 0}>شحن كل طلاب المدرسة</button>
+              <input name="amount" type="number" min="0.01" step="0.01" placeholder="مبلغ فسحة لكل طالب" required />
+              <button disabled={!selectedSchoolId || schoolStudents.length === 0}>تخصيص لكل طلاب المدرسة</button>
             </form>
 
             <form className="mini-form" onSubmit={event => void submitBulk(event, 'selected')}>
-              <input name="amount" type="number" min="0.01" step="0.01" placeholder="مبلغ لكل طالب محدد" required />
-              <button disabled={!selectedSchoolId || selectedStudentIds.length === 0}>شحن الطلاب المحددين ({selectedStudentIds.length})</button>
+              <input name="amount" type="number" min="0.01" step="0.01" placeholder="مبلغ فسحة لكل طالب محدد" required />
+              <button disabled={!selectedSchoolId || selectedStudentIds.length === 0}>تخصيص للطلاب المحددين ({selectedStudentIds.length})</button>
             </form>
           </div>
 
@@ -176,7 +176,7 @@ export default function Wallets() {
             <th>الطالب</th>
             <th>الرمز</th>
             <th>المدرسة</th>
-            <th>الرصيد الحالي</th>
+            <th>رصيد الفسحة المتاح</th>
           </tr>
         </thead>
         <tbody>

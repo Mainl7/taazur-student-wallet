@@ -83,7 +83,7 @@ export default function AlertsPage() {
       </section>
 
       <div className="alert-grid">
-        <article className="alert-card warn"><h2>رصيد أقل من 10 ريال</h2>{alerts?.lowBalances.length ? alerts.lowBalances.map(item => <p key={`${item.studentCode}-${item.schoolName}`}>{item.studentName} — {item.schoolName}: <strong>{item.balance} ر.س</strong></p>) : <Empty />}</article>
+        <article className="alert-card warn"><h2>رصيد فسحة أقل من 10 ريال</h2>{alerts?.lowBalances.length ? alerts.lowBalances.map(item => <p key={`${item.studentCode}-${item.schoolName}`}>{item.studentName} — {item.schoolName}: <strong>{item.balance} ر.س</strong></p>) : <Empty />}</article>
         <article className="alert-card danger"><h2>وصل الحد اليومي</h2>{alerts?.dailyLimitReached.length ? alerts.dailyLimitReached.map(item => <p key={`${item.studentCode}-${item.schoolName}`}>{item.studentName} — صرف {item.spentToday} من حد {item.dailyLimit} ر.س</p>) : <Empty />}</article>
         <article className="alert-card danger"><h2>محاولة استخدام بطاقة ملغاة</h2>{alerts?.revokedCardAttempts.length ? alerts.revokedCardAttempts.map(item => <p key={`${item.at}-${item.token}`}>{new Date(item.at).toLocaleString('ar-SA')} — {item.schoolName} — {item.userEmail} — {item.token}</p>) : <Empty />}</article>
         <article className="alert-card warn"><h2>محاولات دخول فاشلة</h2>{alerts?.failedLogins.length ? alerts.failedLogins.map(item => <p key={item.email}>{item.email}: {item.failedCount} محاولات{item.lockedUntil ? ` — مقفل حتى ${new Date(item.lockedUntil).toLocaleString('ar-SA')}` : ''}</p>) : <Empty />}</article>

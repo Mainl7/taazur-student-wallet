@@ -93,7 +93,7 @@ export default function CanteenOwnerPage() {
           <BrandLogo compact />
           <div>
             <h1>واجهة مالك المقصف</h1>
-            <span>هنا تظهر بيانات المقاصف التابعة لك فقط: المصاريف الحالية والمبالغ التي تمت تسويتها</span>
+            <span>هنا تظهر بيانات المقاصف التابعة لك فقط: مستحقات الفسحة الحالية والمبالغ التي تمت تسويتها من الجمعية</span>
           </div>
           <div className="owner-actions">
             <LogoutButton />
@@ -101,11 +101,11 @@ export default function CanteenOwnerPage() {
         </header>
 
         <div className="cards owner-cards">
-          <article><small>مستحقات المقاصف الحالية</small><b>{totals?.net ?? '0.00'} ر.س</b></article>
+          <article><small>مستحقات المقاصف على الجمعية</small><b>{totals?.net ?? '0.00'} ر.س</b></article>
           <article><small>مبالغ تمت تسويتها</small><b>{totals?.settled ?? '0.00'} ر.س</b></article>
-          <article><small>إجمالي الخصومات</small><b>{totals?.debit ?? '0.00'} ر.س</b></article>
+          <article><small>إجمالي مصروفات الفسحة</small><b>{totals?.debit ?? '0.00'} ر.س</b></article>
           <article><small>إجمالي الاسترجاع</small><b>{totals?.refund ?? '0.00'} ر.س</b></article>
-          <article><small>عدد عمليات الخصم</small><b>{totals?.transactionCount ?? 0}</b></article>
+          <article><small>عدد عمليات الفسحة</small><b>{totals?.transactionCount ?? 0}</b></article>
         </div>
 
         {message && <p role="status">{message}</p>}
@@ -117,7 +117,7 @@ export default function CanteenOwnerPage() {
               <th>المقصف</th>
               <th>المدرسة</th>
               <th>المستحق الحالي</th>
-              <th>الخصومات</th>
+              <th>مصروفات الفسحة</th>
               <th>الاسترجاع</th>
               <th>عدد العمليات</th>
               <th>تمت تسويته</th>

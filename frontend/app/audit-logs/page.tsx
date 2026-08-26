@@ -11,8 +11,8 @@ const labels: Record<string, string> = {
   STUDENT_CREATED: 'إنشاء طالب',
   CARD_REVOKED: 'إلغاء بطاقة',
   CARD_ISSUED: 'إصدار بطاقة',
-  WALLET_TOP_UP: 'شحن محفظة',
-  CANTEEN_DEBIT: 'خصم مقصف',
+  WALLET_TOP_UP: 'تخصيص مبلغ فسحة',
+  CANTEEN_DEBIT: 'صرف فسحة في المقصف',
   TRANSACTION_REFUNDED: 'استرجاع عملية',
   CANTEEN_USER_CREATED: 'إنشاء حساب مقصف',
   STUDENT_UPDATED: 'تعديل بيانات طالب'

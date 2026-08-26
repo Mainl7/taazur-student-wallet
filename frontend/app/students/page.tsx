@@ -60,7 +60,7 @@ export default function Students() {
     if (!response.ok) return setMessage('تعذر إضافة الطالب.');
 
     form.reset();
-    setMessage('تمت إضافة الطالب وبطاقته ومحفظته.');
+    setMessage('تمت إضافة الطالب وبطاقته ورصيد الفسحة الخاص به.');
     void load();
   }
 
@@ -160,7 +160,7 @@ export default function Students() {
             <th>الصف</th>
             <th>المدرسة</th>
             <th>الحد اليومي</th>
-            <th>الرصيد</th>
+            <th>رصيد الفسحة</th>
             <th>بطاقة QR</th>
             <th>الإجراء</th>
           </tr>

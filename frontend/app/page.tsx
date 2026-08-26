@@ -72,7 +72,7 @@ export default function DashboardPage() {
 
   const selectedSchoolName = useMemo(() => schools.find(school => school.id === schoolId)?.name ?? 'كل المدارس', [schoolId, schools]);
   const stats = data ? [
-    ['إجمالي رصيد المحافظ', `${data.walletBalance} ر.س`],
+    ['إجمالي رصيد الفسحة المتاح', `${data.walletBalance} ر.س`],
     ['مصروف اليوم', `${data.todaySpent} ر.س`],
     ['مصروف هذا الأسبوع', `${data.weekSpent} ر.س`],
     ['مصروف هذا الشهر', `${data.monthSpent} ر.س`],
@@ -193,7 +193,7 @@ export default function DashboardPage() {
                 <b>{item.metric}</b>
               </a>
             ))}
-            {!data?.quickAlerts.actionItems?.length && data?.quickAlerts.lowBalances.slice(0, 3).map(item => <p key={`${item.studentCode}-${item.schoolName}`}>رصيد منخفض: {item.studentName} — {item.balance} ر.س</p>)}
+            {!data?.quickAlerts.actionItems?.length && data?.quickAlerts.lowBalances.slice(0, 3).map(item => <p key={`${item.studentCode}-${item.schoolName}`}>رصيد فسحة منخفض: {item.studentName} — {item.balance} ر.س</p>)}
             {!data?.quickAlerts.actionItems?.length && data?.quickAlerts.dailyLimitReached.slice(0, 3).map(item => <p key={`${item.studentCode}-${item.schoolName}`}>وصل الحد اليومي: {item.studentName} — {item.spentToday}/{item.dailyLimit} ر.س</p>)}
             {!data?.quickAlerts.actionItems?.length && !!data?.quickAlerts.failedLogins && <p>محاولات دخول فاشلة كثيرة: {data.quickAlerts.failedLogins}</p>}
             {!data?.quickAlerts.actionItems?.length && !!data?.quickAlerts.repeatedRefunds && <p>استرجاعات متكررة: {data.quickAlerts.repeatedRefunds}</p>}
@@ -202,9 +202,9 @@ export default function DashboardPage() {
           </article>
 
           <article className="panel canteen-overview">
-            <h2>ملخص المقصف</h2>
+            <h2>ملخص مستحقات المقصف</h2>
             <div className="canteen-number">
-              <small>إجمالي المستحقات غير المسددة</small>
+              <small>مستحقات المقاصف على الجمعية</small>
               <strong>{data?.canteen.unsettledTotal ?? '0.00'} ر.س</strong>
             </div>
             <p>عدد المقاصف التي عليها مبالغ: <strong>{data?.canteen.canteensWithDue ?? 0}</strong></p>
@@ -216,7 +216,7 @@ export default function DashboardPage() {
       <section className="panel quick-actions">
         <h2>إجراءات سريعة</h2>
         <a href="/students">إضافة طالب ←</a>
-        <a href="/wallets">شحن محفظة ←</a>
+        <a href="/wallets">تخصيص مبلغ فسحة ←</a>
         <a href="/cards">طباعة البطاقات ←</a>
         <a href="/exports">تصدير تقرير شهري ←</a>
         <a href="/canteen-users">إنشاء حساب مقصف ←</a>

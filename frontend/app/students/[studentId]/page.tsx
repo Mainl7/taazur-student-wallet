@@ -33,7 +33,7 @@ type StudentDetails = {
   totals: Record<string, string>;
 };
 
-const labels: Record<string, string> = { CREDIT: 'شحن', DEBIT: 'خصم', REFUND: 'استرجاع', REVERSAL: 'عكس', ADJUSTMENT: 'تسوية' };
+const labels: Record<string, string> = { CREDIT: 'تخصيص فسحة', DEBIT: 'صرف مقصف', REFUND: 'استرجاع', REVERSAL: 'عكس', ADJUSTMENT: 'تسوية' };
 
 export default function StudentDetailsPage() {
   const params = useParams<{ studentId: string }>();
@@ -70,10 +70,10 @@ export default function StudentDetailsPage() {
       {data && (
         <>
           <div className="cards">
-            <article><small>الرصيد الحالي</small><b>{data.student.wallet ? `${data.student.wallet.balance} ${data.student.wallet.currency}` : '—'}</b></article>
+            <article><small>رصيد الفسحة المتاح</small><b>{data.student.wallet ? `${data.student.wallet.balance} ${data.student.wallet.currency}` : '—'}</b></article>
             <article><small>الحد اليومي</small><b>{data.student.dailyLimit} ر.س</b></article>
-            <article><small>إجمالي الشحن</small><b>{data.totals.CREDIT ?? '0.00'} ر.س</b></article>
-            <article><small>إجمالي الصرف</small><b>{data.totals.DEBIT ?? '0.00'} ر.س</b></article>
+            <article><small>إجمالي المخصص من الجمعية</small><b>{data.totals.CREDIT ?? '0.00'} ر.س</b></article>
+            <article><small>إجمالي المصروف في المقصف</small><b>{data.totals.DEBIT ?? '0.00'} ر.س</b></article>
           </div>
 
           <section className="dashboard-section">

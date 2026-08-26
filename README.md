@@ -20,4 +20,4 @@
 
 ## ضمانات المعاملة المالية
 
-نقطة الخصم تتطلب `Idempotency-Key` وتستخدم MySQL transaction مع `SELECT … FOR UPDATE`. لا يُخصم الرصيد مرتين عند إعادة الطلب؛ ويُسجل كل تغيير في دفتر الأستاذ `WalletTransaction`.
+نقطة صرف الفسحة تتطلب `Idempotency-Key` وتستخدم MySQL transaction مع `SELECT … FOR UPDATE`. لا يُخصم رصيد الفسحة مرتين عند إعادة الطلب؛ ويُسجل كل تغيير في دفتر الأستاذ `WalletTransaction`.

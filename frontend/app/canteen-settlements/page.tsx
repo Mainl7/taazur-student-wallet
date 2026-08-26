@@ -60,7 +60,7 @@ export default function CanteenSettlementsPage() {
 
   return (
     <AdminShell>
-      <header><div><h1>تسوية المقصف</h1><span>مجموع الخصومات المستحقة لكل مقصف بعد خصم الاسترجاعات</span></div><button onClick={() => void load()}>تحديث</button></header>
+      <header><div><h1>تسوية المقصف</h1><span>مستحقات المقاصف على الجمعية بعد خصم الاسترجاعات</span></div><button onClick={() => void load()}>تحديث</button></header>
       {message && <p role="status">{message}</p>}
       <div className="report-grid">
         {summaries.map(summary => (
@@ -69,7 +69,7 @@ export default function CanteenSettlementsPage() {
             <h3>{summary.canteen?.name ?? summary.canteenUser.email}</h3>
             {summary.canteen && <p>المشغّل: {summary.canteenUser.email}</p>}
             <b>{summary.net} ر.س</b>
-            <p>خصومات: {summary.debit} ر.س — استرجاع: {summary.refund} ر.س — عدد الخصومات: {summary.transactionCount}</p>
+            <p>مصروفات فسحة: {summary.debit} ر.س — استرجاع: {summary.refund} ر.س — عدد العمليات: {summary.transactionCount}</p>
             {summary.canteen && <a className="table-link" href={`/canteens/${summary.canteen.id}`}>تفاصيل المقصف</a>}
             <button onClick={() => void settle(summary)} disabled={Number(summary.net) <= 0}>تم سداد المقصف</button>
           </article>

@@ -778,8 +778,8 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
         id: `LOW_BALANCE_${wallet.student.id}`,
         type: 'LOW_BALANCE',
         severity: 'warn' as const,
-        title: 'رصيد طالب منخفض',
-        description: `${wallet.student.fullName} في ${wallet.student.school.name} رصيده ${asMoney(wallet.balance)} ر.س`,
+        title: 'رصيد فسحة منخفض',
+        description: `${wallet.student.fullName} في ${wallet.student.school.name} رصيد الفسحة لديه ${asMoney(wallet.balance)} ر.س`,
         metric: `${asMoney(wallet.balance)} ر.س`,
         href: `/students/${wallet.student.id}`
       })),
@@ -897,7 +897,7 @@ async function monthlyExpenseRows(req: Request) {
   const students = await prisma.student.findMany({ where: { id: { in: studentIds } }, select: { id: true, fullName: true, studentCode: true, grade: true } });
   const studentMap = new Map(students.map(student => [student.id, student]));
   const rows = [
-    ['الشهر', 'التاريخ', 'المدرسة', 'رمز الطالب', 'اسم الطالب', 'الصف', 'نوع العملية', 'المبلغ', 'الرصيد قبل', 'الرصيد بعد', 'منفذ العملية', 'رقم العملية'],
+    ['الشهر', 'التاريخ', 'المدرسة', 'رمز الطالب', 'اسم الطالب', 'الصف', 'نوع العملية', 'المبلغ', 'رصيد الفسحة قبل', 'رصيد الفسحة بعد', 'منفذ العملية', 'رقم العملية'],
     ...transactions.map(transaction => {
       const student = studentMap.get(transaction.studentId);
       return [
@@ -1108,8 +1108,8 @@ app.get('/api/v1/alerts', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, 
         id: `LOW_BALANCE_${item.studentId}`,
         type: 'LOW_BALANCE',
         severity: 'warn' as const,
-        title: 'رصيد أقل من 10 ريال',
-        description: `${item.studentName} — ${item.schoolName} — الرصيد ${item.balance} ر.س`,
+        title: 'رصيد فسحة أقل من 10 ريال',
+        description: `${item.studentName} — ${item.schoolName} — رصيد الفسحة ${item.balance} ر.س`,
         metric: `${item.balance} ر.س`,
         href: `/students/${item.studentId}`,
         createdAt: today
@@ -1162,7 +1162,7 @@ app.get('/api/v1/exports/students.csv', auth, roles(Role.SUPER_ADMIN, Role.ASSOC
     const schoolId = scopedSchoolFromQuery(req);
     const students = await prisma.student.findMany({ where: schoolId ? { schoolId } : {}, include: { school: { select: { name: true } }, wallet: { select: { balance: true, currency: true } }, cards: { where: { status: CardStatus.ACTIVE }, select: { publicToken: true } } }, orderBy: [{ schoolId: 'asc' }, { fullName: 'asc' }] });
     sendCsv(res, 'taazur-students.csv', [
-      ['المدرسة', 'رمز الطالب', 'اسم الطالب', 'الصف', 'الحد اليومي', 'الرصيد', 'العملة', 'رمز البطاقة النشطة'],
+      ['المدرسة', 'رمز الطالب', 'اسم الطالب', 'الصف', 'الحد اليومي', 'رصيد الفسحة', 'العملة', 'رمز البطاقة النشطة'],
       ...students.map(student => [student.school.name, student.studentCode, student.fullName, student.grade, asMoney(student.dailyLimit), asMoney(student.wallet?.balance), student.wallet?.currency ?? 'SAR', student.cards[0]?.publicToken ?? '—'])
     ]);
   } catch (error) { next(error); }

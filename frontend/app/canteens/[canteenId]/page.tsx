@@ -40,7 +40,7 @@ type CanteenDetails = {
   }>;
 };
 
-const labels: Record<string, string> = { CREDIT: 'شحن', DEBIT: 'خصم', REFUND: 'استرجاع', REVERSAL: 'عكس', ADJUSTMENT: 'تسوية' };
+const labels: Record<string, string> = { CREDIT: 'تخصيص فسحة', DEBIT: 'صرف مقصف', REFUND: 'استرجاع', REVERSAL: 'عكس', ADJUSTMENT: 'تسوية' };
 
 export default function CanteenDetailsPage() {
   const params = useParams<{ canteenId: string }>();
@@ -81,8 +81,8 @@ export default function CanteenDetailsPage() {
       {data && (
         <>
           <div className="cards">
-            <article><small>المستحق الحالي</small><b>{data.summary.net} ر.س</b></article>
-            <article><small>إجمالي الخصومات</small><b>{data.summary.debit} ر.س</b></article>
+            <article><small>المستحق الحالي على الجمعية</small><b>{data.summary.net} ر.س</b></article>
+            <article><small>إجمالي مصروفات الفسحة</small><b>{data.summary.debit} ر.س</b></article>
             <article><small>إجمالي الاسترجاع</small><b>{data.summary.refund} ر.س</b></article>
             <article><small>تمت تسويته</small><b>{data.summary.settled} ر.س</b></article>
           </div>

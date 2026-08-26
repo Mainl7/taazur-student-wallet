@@ -32,7 +32,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
           <a href="/schools">المدارس</a>
           <a href="/students">الطلاب</a>
           <a href="/cards">البطاقات</a>
-          <a href="/wallets">المحافظ</a>
+          <a href="/wallets">مبالغ الفسحة</a>
           <a href="/canteen-users">ملاك المقاصف</a>
           <a href="/canteen-settlements">تسوية المقاصف</a>
           <a href="/reports">التقارير</a>
