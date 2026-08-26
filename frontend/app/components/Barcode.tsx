@@ -127,9 +127,9 @@ async function buildCardCanvas(input: CardRenderInput) {
     await document.fonts.load(`900 ${input.nameFontSize}px Tajawal`);
   }
 
-  const qrUrl = await QRCode.toDataURL(input.value, { width: 512, margin: 2, errorCorrectionLevel: 'M' });
+  const qrUrl = await QRCode.toDataURL(input.value, { width: 640, margin: 1, errorCorrectionLevel: 'M' });
   const qrImage = await loadImage(qrUrl);
-  context.drawImage(qrImage, 28, 219, 196, 196);
+  context.drawImage(qrImage, 25, 203, 202, 202);
 
   context.direction = 'rtl';
   context.textAlign = 'right';
@@ -138,15 +138,17 @@ async function buildCardCanvas(input: CardRenderInput) {
   context.shadowOffsetY = 2;
   context.fillStyle = '#ffffff';
   context.font = `900 ${input.nameFontSize}px Tajawal, Tahoma, Arial, sans-serif`;
-  context.fillText(input.studentName, 790, 288, 390);
+  context.fillText(input.studentName, 792, 296, 405);
   context.fillStyle = '#ffffff';
   context.font = '900 40px Tahoma, Arial, sans-serif';
   context.direction = 'ltr';
   context.textAlign = 'right';
-  context.fillText(input.studentCode, 790, 378, 330);
+  context.fillText(input.studentCode, 792, 387, 350);
   context.fillStyle = '#ffffff';
-  context.font = '900 22px Tahoma, Arial, sans-serif';
-  context.fillText(input.schoolName, 790, 463, 450);
+  context.font = '900 24px Tajawal, Tahoma, Arial, sans-serif';
+  context.direction = 'rtl';
+  context.textAlign = 'right';
+  context.fillText(input.schoolName, 792, 474, 470);
   return canvas;
 }
 
@@ -197,7 +199,7 @@ export default function Barcode(props: BarcodeProps) {
 
   useEffect(() => {
     let active = true;
-    void QRCode.toDataURL(value, { width: 512, margin: 2, errorCorrectionLevel: 'M' }).then(url => {
+    void QRCode.toDataURL(value, { width: 640, margin: 1, errorCorrectionLevel: 'M' }).then(url => {
       if (active) setQrUrl(url);
     });
     return () => { active = false; };
