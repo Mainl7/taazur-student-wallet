@@ -58,9 +58,9 @@ tbody tr:hover{background:#fbf8ef}
 .student-print-card:before,.student-print-card:after{display:none}
 .student-card-background{position:absolute;z-index:0;inset:0;width:100%;height:100%;object-fit:fill;display:block;pointer-events:none}
 .student-card-info{position:absolute;z-index:2;inset:0;display:block;min-width:0;text-align:right;direction:rtl;text-shadow:0 2px 8px rgba(0,0,0,.3)}
-.student-card-info strong{position:absolute;top:25.4mm;right:6.4mm;max-width:47.5mm;color:#fff;font-size:var(--student-name-size,14.5pt);line-height:1.08;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.student-card-info b{position:absolute;top:34.2mm;right:6.4mm;color:#fff;font-size:12pt;line-height:1.05;font-weight:900;direction:ltr;text-align:right;white-space:nowrap}
-.student-card-info span{position:absolute;top:43.2mm;right:6.4mm;max-width:49mm;color:#fff;font-size:7.7pt;font-weight:900;line-height:1.12;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.student-card-info strong{position:absolute;top:25.4mm;right:6.4mm;max-width:45.5mm;color:#fff;font-size:var(--student-name-size,10.8pt);line-height:1.08;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.student-card-info b{position:absolute;top:33.1mm;right:6.4mm;color:#fff;font-size:9.7pt;line-height:1.05;font-weight:900;direction:ltr;text-align:right;white-space:nowrap}
+.student-card-info span{position:absolute;top:41.9mm;right:6.4mm;max-width:49mm;color:#fff;font-size:7.7pt;font-weight:900;line-height:1.12;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .student-card-qr{position:absolute;z-index:2;left:2.5mm;top:20.3mm;display:block;direction:rtl;background:transparent;border:0;border-radius:0;padding:0}
 .qr-code{display:block;width:20.2mm;height:20.2mm;border:0;border-radius:0;background:#fff;box-shadow:none}
 .student-card-qr span{display:none}
