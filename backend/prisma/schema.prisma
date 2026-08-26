@@ -46,8 +46,22 @@ model User {
   canteenSettlements CanteenSettlement[] @relation("canteenSettlements")
   settlementsMade CanteenSettlement[] @relation("settledBy")
   auditLogs AuditLog[]
+  sessions UserSession[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model UserSession {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  ip String?
+  userAgent String? @db.VarChar(500)
+  revokedAt DateTime?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  @@index([userId, revokedAt, expiresAt])
 }
 model School {
   id String @id @default(cuid())

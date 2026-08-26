@@ -40,6 +40,8 @@ export default function AdminShell({ children }: { children: ReactNode }) {
           <a href="/exports">التصدير</a>
           <a href="/transactions">العمليات</a>
           <a href="/audit-logs">التدقيق</a>
+          <a href="/account">الحساب والأمان</a>
+          <a href="/system">صحة النظام</a>
           <LogoutButton />
         </nav>
       </aside>

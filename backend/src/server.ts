@@ -13,6 +13,8 @@ const app = express();
 const cookieName = 'taazur_access_token';
 const loginWindowMs = 15 * 60 * 1000;
 const maxFailedLogins = 5;
+const sessionDurationMs = Number(process.env.SESSION_DURATION_HOURS ?? 8) * 60 * 60 * 1000;
+const demoEmails = ['admin@taazur.local', 'operator@taazur.local'];
 const cookieSecure = process.env.COOKIE_SECURE !== 'false';
 const allowedOrigins = (process.env.WEB_ORIGIN ?? 'http://localhost:3000')
   .split(',')
@@ -36,7 +38,7 @@ app.use((req, res, next) => {
 });
 app.use(express.json({ limit: '32kb' }));
 
-type Claims = { sub: string; role: Role; schoolId?: string };
+type Claims = { sub: string; role: Role; schoolId?: string; sid?: string };
 type CanteenAccess = { canteenId: string | null; schoolId: string; name: string };
 type AuditInput = {
   action: string;
@@ -54,6 +56,7 @@ const scopedSchool = (claims: Claims, schoolId: string) => !claims.schoolId || c
 const requestIp = (req: Request) => (req.ip || req.socket.remoteAddress || '').replace(/^::ffff:/, '');
 const requestUserAgent = (req: Request) => req.header('user-agent')?.slice(0, 500);
 const cookieToken = (req: Request) => req.header('cookie')?.split(';').map(part => part.trim()).find(part => part.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
+const clearAuthCookie = (res: Response) => res.clearCookie(cookieName, { httpOnly: true, secure: cookieSecure, sameSite: cookieSecure ? 'none' : 'lax', path: '/' });
 const routeParam = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] : value ?? '';
 const money = (value: unknown) => Number(value ?? 0);
 const asMoney = (value: unknown) => money(value).toFixed(2);
@@ -201,10 +204,24 @@ function sendPrintableReport(res: Response, title: string, rows: unknown[][]) {
     .send(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${title}</title><style>@page{size:A4;margin:14mm}body{font-family:Tahoma,Arial;color:#14342a;background:#fff}.toolbar{margin:0 0 16px}@media print{.toolbar{display:none}}button{background:#0b5a42;color:#fff;border:0;border-radius:8px;padding:10px 18px;font-weight:700}h1{margin:0 0 8px}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #b7c8bf;padding:8px;text-align:right;font-size:12px}th{background:#eaf5ef}</style></head><body><div class="toolbar"><button onclick="window.print()">طباعة / حفظ PDF</button></div><h1>${title}</h1><p>تقرير جاهز للطباعة والحفظ كملف PDF من المتصفح.</p><table>${htmlRows}</table></body></html>`);
 }
 
-const auth = (req: Request, res: Response, next: NextFunction) => {
+const auth = async (req: Request, res: Response, next: NextFunction) => {
   const token = req.header('authorization')?.replace(/^Bearer\s+/i, '') || cookieToken(req);
   if (!token) return res.status(401).json({ error: 'AUTH_REQUIRED' });
-  try { req.claims = jwt.verify(token, process.env.JWT_SECRET!) as Claims; next(); }
+  try {
+    const claims = jwt.verify(token, process.env.JWT_SECRET!) as Claims;
+    if (!claims.sid) return res.status(401).json({ error: 'INVALID_TOKEN' });
+    const session = await prisma.userSession.findUnique({
+      where: { id: claims.sid },
+      select: { userId: true, revokedAt: true, expiresAt: true }
+    });
+    if (!session || session.userId !== claims.sub || session.revokedAt || session.expiresAt <= new Date()) {
+      clearAuthCookie(res);
+      return res.status(401).json({ error: 'INVALID_TOKEN' });
+    }
+    req.claims = claims;
+    prisma.userSession.update({ where: { id: claims.sid }, data: { lastSeenAt: new Date(), ip: requestIp(req), userAgent: requestUserAgent(req) } }).catch(() => undefined);
+    next();
+  }
   catch { return res.status(401).json({ error: 'INVALID_TOKEN' }); }
 };
 
@@ -244,13 +261,21 @@ app.post('/api/v1/auth/login', async (req, res, next) => {
     }
 
     await prisma.loginAttempt.deleteMany({ where: { email } });
-    const token = jwt.sign({ sub: user.id, role: user.role, schoolId: user.schoolId ?? undefined }, process.env.JWT_SECRET!, { expiresIn: '15m' });
+    const session = await prisma.userSession.create({
+      data: {
+        userId: user.id,
+        ip: requestIp(req),
+        userAgent: requestUserAgent(req),
+        expiresAt: new Date(Date.now() + sessionDurationMs)
+      }
+    });
+    const token = jwt.sign({ sub: user.id, role: user.role, schoolId: user.schoolId ?? undefined, sid: session.id }, process.env.JWT_SECRET!, { expiresIn: Math.floor(sessionDurationMs / 1000) });
     res.cookie(cookieName, token, {
       httpOnly: true,
       secure: cookieSecure,
       sameSite: cookieSecure ? 'none' : 'lax',
       path: '/',
-      maxAge: 15 * 60 * 1000
+      maxAge: sessionDurationMs
     });
     await prisma.auditLog.create({
       data: {
@@ -259,6 +284,7 @@ app.post('/api/v1/auth/login', async (req, res, next) => {
         action: 'AUTH_LOGIN',
         entity: 'User',
         entityId: user.id,
+        newValue: cleanJson({ sessionId: session.id }),
         ip: requestIp(req),
         userAgent: requestUserAgent(req)
       }
@@ -267,9 +293,91 @@ app.post('/api/v1/auth/login', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-app.post('/api/v1/auth/logout', (_req, res) => {
-  res.clearCookie(cookieName, { httpOnly: true, secure: cookieSecure, sameSite: cookieSecure ? 'none' : 'lax', path: '/' });
+app.post('/api/v1/auth/logout', (req, res) => {
+  const token = cookieToken(req);
+  if (token) {
+    try {
+      const claims = jwt.verify(token, process.env.JWT_SECRET!) as Claims;
+      if (claims.sid) prisma.userSession.update({ where: { id: claims.sid }, data: { revokedAt: new Date() } }).catch(() => undefined);
+    } catch { /* ignore invalid logout token */ }
+  }
+  clearAuthCookie(res);
   res.json({ ok: true });
+});
+
+app.get('/api/v1/auth/sessions', auth, async (req, res, next) => {
+  try {
+    const sessions = await prisma.userSession.findMany({
+      where: { userId: req.claims!.sub },
+      orderBy: { lastSeenAt: 'desc' },
+      take: 25
+    });
+    res.json({
+      currentSessionId: req.claims!.sid,
+      sessions: sessions.map(session => ({
+        id: session.id,
+        ip: session.ip,
+        userAgent: session.userAgent,
+        createdAt: session.createdAt,
+        lastSeenAt: session.lastSeenAt,
+        expiresAt: session.expiresAt,
+        revokedAt: session.revokedAt,
+        current: session.id === req.claims!.sid
+      }))
+    });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/v1/auth/logout-all', auth, async (req, res, next) => {
+  try {
+    await prisma.$transaction(async tx => {
+      await tx.userSession.updateMany({
+        where: { userId: req.claims!.sub, revokedAt: null },
+        data: { revokedAt: new Date() }
+      });
+      await audit(tx, req, { action: 'AUTH_LOGOUT_ALL', entity: 'User', entityId: req.claims!.sub, newValue: cleanJson({ keepCurrent: false }) });
+    });
+    clearAuthCookie(res);
+    res.json({ ok: true });
+  } catch (error) { next(error); }
+});
+
+app.delete('/api/v1/auth/sessions/:sessionId', auth, async (req, res, next) => {
+  try {
+    const sessionId = routeParam(req.params.sessionId);
+    const session = await prisma.userSession.findUnique({ where: { id: sessionId }, select: { userId: true } });
+    if (!session || session.userId !== req.claims!.sub) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
+    await prisma.$transaction(async tx => {
+      await tx.userSession.update({ where: { id: sessionId }, data: { revokedAt: new Date() } });
+      await audit(tx, req, { action: 'AUTH_SESSION_REVOKED', entity: 'UserSession', entityId: sessionId, newValue: cleanJson({ current: sessionId === req.claims!.sid }) });
+    });
+    if (sessionId === req.claims!.sid) clearAuthCookie(res);
+    res.json({ ok: true });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/v1/auth/change-password', auth, async (req, res, next) => {
+  try {
+    const input = z.object({
+      currentPassword: z.string().min(12).max(128),
+      newPassword: z.string().min(16).max(128)
+    }).parse(req.body);
+    if (input.currentPassword === input.newPassword) return res.status(400).json({ error: 'PASSWORD_UNCHANGED' });
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: req.claims!.sub }, select: { id: true, passwordHash: true, status: true } });
+    if (user.status !== EntityStatus.ACTIVE) return res.status(401).json({ error: 'INVALID_TOKEN' });
+    const validPassword = await argon2.verify(user.passwordHash, input.currentPassword);
+    if (!validPassword) return res.status(401).json({ error: 'INVALID_CREDENTIALS' });
+    const passwordHash = await argon2.hash(input.newPassword);
+    await prisma.$transaction(async tx => {
+      await tx.user.update({ where: { id: user.id }, data: { passwordHash } });
+      await tx.userSession.updateMany({
+        where: { userId: user.id, id: { not: req.claims!.sid }, revokedAt: null },
+        data: { revokedAt: new Date() }
+      });
+      await audit(tx, req, { action: 'AUTH_PASSWORD_CHANGED', entity: 'User', entityId: user.id, newValue: cleanJson({ otherSessionsRevoked: true }) });
+    });
+    res.json({ ok: true });
+  } catch (error) { next(error); }
 });
 
 app.get('/api/v1/auth/me', auth, async (req, res, next) => {
@@ -1661,6 +1769,130 @@ app.get('/api/v1/audit-logs.csv', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION
       ['الوقت', 'الإجراء', 'الكيان', 'معرف الكيان', 'المدرسة', 'المستخدم', 'IP', 'قبل', 'بعد'],
       ...logs.map(log => [log.timestamp.toLocaleString('ar-SA'), log.action, log.entity, log.entityId, log.school ? `${log.school.name} — ${log.school.schoolCode}` : '—', log.user?.email ?? 'النظام', log.ip ?? '—', JSON.stringify(log.oldValue ?? ''), JSON.stringify(log.newValue ?? '')])
     ]);
+  } catch (error) { next(error); }
+});
+
+app.get('/api/v1/system/status', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    const officialAdminEmail = process.env.OFFICIAL_ADMIN_EMAIL?.trim().toLowerCase() ?? '';
+    const [
+      users,
+      schools,
+      students,
+      canteens,
+      transactions,
+      activeSessions,
+      lockedLogins,
+      lockedAttempts,
+      demoAccounts,
+      officialAdmin
+    ] = await Promise.all([
+      prisma.user.count(),
+      prisma.school.count({ where: req.claims!.schoolId ? { id: req.claims!.schoolId } : {} }),
+      prisma.student.count({ where: req.claims!.schoolId ? { schoolId: req.claims!.schoolId } : {} }),
+      prisma.canteen.count({ where: req.claims!.schoolId ? { schoolId: req.claims!.schoolId } : {} }),
+      prisma.walletTransaction.count({ where: req.claims!.schoolId ? { schoolId: req.claims!.schoolId } : {} }),
+      prisma.userSession.count({ where: { revokedAt: null, expiresAt: { gt: new Date() } } }),
+      prisma.loginAttempt.count({ where: { lockedUntil: { gt: new Date() } } }),
+      prisma.loginAttempt.findMany({ where: { lockedUntil: { gt: new Date() } }, orderBy: { lastAttemptAt: 'desc' }, take: 25 }),
+      prisma.user.findMany({ where: { email: { in: demoEmails } }, select: { id: true, email: true, role: true, status: true, createdAt: true } }),
+      officialAdminEmail ? prisma.user.findUnique({ where: { email: officialAdminEmail }, select: { id: true, email: true, role: true, status: true } }) : Promise.resolve(null)
+    ]);
+    res.json({
+      database: { ok: true, provider: 'mysql' },
+      environment: {
+        nodeEnv: process.env.NODE_ENV ?? 'development',
+        cookieSecure,
+        sessionDurationHours: Math.round(sessionDurationMs / 60 / 60 / 1000),
+        officialAdminEmailConfigured: !!officialAdminEmail,
+        webOriginConfigured: !!process.env.WEB_ORIGIN
+      },
+      counts: { users, schools, students, canteens, transactions, activeSessions, lockedLogins },
+      lockedAttempts,
+      demoAccounts,
+      officialAdmin,
+      recommendations: [
+        'فعّل نسخة MySQL يومية من لوحة الاستضافة.',
+        'نزّل نسخة JSON قبل أي تعديل كبير.',
+        'أبقِ COOKIE_SECURE=true في الإنتاج مع HTTPS.',
+        'تأكد أن WEB_ORIGIN يطابق رابط الموقع الرسمي فقط.'
+      ]
+    });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/v1/system/unlock-login', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN), async (req, res, next) => {
+  try {
+    const input = z.object({ email: z.string().trim().email() }).parse(req.body);
+    await prisma.$transaction(async tx => {
+      await tx.loginAttempt.deleteMany({ where: { email: input.email.toLowerCase() } });
+      await audit(tx, req, { action: 'LOGIN_UNLOCKED', entity: 'LoginAttempt', entityId: input.email.toLowerCase(), newValue: cleanJson({ email: input.email.toLowerCase() }) });
+    });
+    res.json({ ok: true });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/v1/system/disable-demo-accounts', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN), async (req, res, next) => {
+  try {
+    const randomHash = await argon2.hash(randomBytes(48).toString('base64url'));
+    const result = await prisma.$transaction(async tx => {
+      const accounts = await tx.user.findMany({ where: { email: { in: demoEmails } }, select: { id: true, email: true, status: true } });
+      if (!accounts.length) return { count: 0, accounts: [] };
+      await tx.user.updateMany({
+        where: { id: { in: accounts.map(account => account.id) } },
+        data: { status: EntityStatus.INACTIVE, passwordHash: randomHash }
+      });
+      await audit(tx, req, {
+        action: 'DEMO_ACCOUNTS_DISABLED',
+        entity: 'User',
+        entityId: 'demo-accounts',
+        newValue: cleanJson({ emails: accounts.map(account => account.email), count: accounts.length })
+      });
+      return { count: accounts.length, accounts };
+    });
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
+app.get('/api/v1/system/backup.json', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN), async (req, res, next) => {
+  try {
+    const [
+      users,
+      schools,
+      students,
+      cards,
+      wallets,
+      transactions,
+      canteens,
+      settlements,
+      auditLogs
+    ] = await Promise.all([
+      prisma.user.findMany({ orderBy: { createdAt: 'asc' }, select: { id: true, email: true, role: true, status: true, schoolId: true, createdAt: true, updatedAt: true } }),
+      prisma.school.findMany({ orderBy: { createdAt: 'asc' } }),
+      prisma.student.findMany({ orderBy: { createdAt: 'asc' } }),
+      prisma.card.findMany({ orderBy: { issuedAt: 'asc' } }),
+      prisma.wallet.findMany(),
+      prisma.walletTransaction.findMany({ orderBy: { createdAt: 'asc' } }),
+      prisma.canteen.findMany({ orderBy: { createdAt: 'asc' } }),
+      prisma.canteenSettlement.findMany({ orderBy: { createdAt: 'asc' } }),
+      prisma.auditLog.findMany({ orderBy: { timestamp: 'asc' }, take: 5000 })
+    ]);
+    await prisma.auditLog.create({
+      data: {
+        userId: req.claims!.sub,
+        schoolId: req.claims!.schoolId,
+        action: 'SYSTEM_BACKUP_DOWNLOADED',
+        entity: 'System',
+        entityId: 'backup-json',
+        ip: requestIp(req),
+        userAgent: requestUserAgent(req)
+      }
+    }).catch(() => undefined);
+    res
+      .header('content-type', 'application/json; charset=utf-8')
+      .header('content-disposition', `attachment; filename="taazur-backup-${new Date().toISOString().slice(0, 10)}.json"`)
+      .send(JSON.stringify({ exportedAt: new Date().toISOString(), version: 1, data: { users, schools, students, cards, wallets, transactions, canteens, settlements, auditLogs } }, null, 2));
   } catch (error) { next(error); }
 });
 
