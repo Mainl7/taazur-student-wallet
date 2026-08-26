@@ -140,7 +140,7 @@ async function buildCardCanvas(input: CardRenderInput) {
   context.font = `900 ${input.nameFontSize}px Tajawal, Tahoma, Arial, sans-serif`;
   context.fillText(input.studentName, 676, 228, 420);
   context.fillStyle = '#ffffff';
-  context.font = '900 40px Tahoma, Arial, sans-serif';
+  context.font = '900 32px Tahoma, Arial, sans-serif';
   context.direction = 'ltr';
   context.textAlign = 'right';
   context.fillText(input.studentCode, 676, 295, 335);
