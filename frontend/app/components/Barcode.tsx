@@ -21,9 +21,9 @@ const cardWidth = 856;
 const cardHeight = 540;
 const pdfWidthPt = 85.6 * 2.8346456693;
 const pdfHeightPt = 54 * 2.8346456693;
-const defaultNameFontSize = 34;
-const minNameFontSize = 22;
-const maxNameFontSize = 44;
+const defaultNameFontSize = 23;
+const minNameFontSize = 18;
+const maxNameFontSize = 40;
 const cardBackgroundPath = '/student-card-background.png';
 
 function safeFileName(value: string) {
@@ -138,17 +138,17 @@ async function buildCardCanvas(input: CardRenderInput) {
   context.shadowOffsetY = 2;
   context.fillStyle = '#ffffff';
   context.font = `900 ${input.nameFontSize}px Tajawal, Tahoma, Arial, sans-serif`;
-  context.fillText(input.studentName, 792, 289, 385);
+  context.fillText(input.studentName, 676, 228, 420);
   context.fillStyle = '#ffffff';
-  context.font = '900 32px Tahoma, Arial, sans-serif';
+  context.font = '900 40px Tahoma, Arial, sans-serif';
   context.direction = 'ltr';
   context.textAlign = 'right';
-  context.fillText(input.studentCode, 792, 362, 345);
+  context.fillText(input.studentCode, 676, 295, 335);
   context.fillStyle = '#ffffff';
   context.font = '900 24px Tajawal, Tahoma, Arial, sans-serif';
   context.direction = 'rtl';
   context.textAlign = 'right';
-  context.fillText(input.schoolName, 792, 449, 470);
+  context.fillText(input.schoolName, 676, 362, 450);
   return canvas;
 }
 
