@@ -12,6 +12,7 @@ type Student = {
   fullName: string;
   grade: string;
   dailyLimit: string;
+  status: string;
   schoolId: string;
   school: { name: string };
   wallet: { balance: string; currency: string } | null;
@@ -30,6 +31,10 @@ export default function Students() {
   const [editing, setEditing] = useState<Student | null>(null);
   const [searchBy, setSearchBy] = useState<StudentSearchKey>('fullName');
   const [searchText, setSearchText] = useState('');
+  const [filterSchoolId, setFilterSchoolId] = useState('');
+  const [filterGrade, setFilterGrade] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [lowBalanceOnly, setLowBalanceOnly] = useState(false);
   const [message, setMessage] = useState('');
 
   const load = async () => {
@@ -84,6 +89,7 @@ export default function Students() {
   }
 
   const activeSchools = schools.filter(school => !school.status || school.status === 'ACTIVE');
+  const grades = useMemo(() => [...new Set(students.map(student => student.grade).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ar', { numeric: true })), [students]);
   const visibleStudents = useMemo(() => {
     const valueOf = (student: Student) => {
       if (searchBy === 'schoolName') return student.school.name;
@@ -92,8 +98,12 @@ export default function Students() {
     const query = normalizeSearch(searchText);
     return students
       .filter(student => !query || normalizeSearch(valueOf(student)).includes(query))
+      .filter(student => !filterSchoolId || student.schoolId === filterSchoolId)
+      .filter(student => !filterGrade || student.grade === filterGrade)
+      .filter(student => !filterStatus || student.status === filterStatus)
+      .filter(student => !lowBalanceOnly || Number(student.wallet?.balance ?? 0) < 10)
       .sort((a, b) => valueOf(a).localeCompare(valueOf(b), 'ar', { numeric: true, sensitivity: 'base' }));
-  }, [searchBy, searchText, students]);
+  }, [filterGrade, filterSchoolId, filterStatus, lowBalanceOnly, searchBy, searchText, students]);
 
   return (
     <AdminShell>
@@ -122,6 +132,11 @@ export default function Students() {
           <input name="fullName" defaultValue={editing.fullName} placeholder="الاسم الكامل" required />
           <input name="grade" defaultValue={editing.grade} placeholder="الصف" required />
           <input name="dailyLimit" defaultValue={editing.dailyLimit} type="number" step="0.01" placeholder="الحد اليومي" required />
+          <select name="status" required defaultValue={editing.status}>
+            <option value="ACTIVE">نشط</option>
+            <option value="SUSPENDED">موقوف</option>
+            <option value="INACTIVE">مؤرشف</option>
+          </select>
           <select name="schoolId" required defaultValue={editing.schoolId}>
             <option value="" disabled>اختر المدرسة</option>
             {activeSchools.map(school => <option key={school.id} value={school.id}>{school.name}</option>)}
@@ -149,6 +164,30 @@ export default function Students() {
           <input value={searchText} onChange={event => setSearchText(event.target.value)} placeholder="اكتب كلمة البحث..." />
         </label>
         <button type="button" className="secondary" onClick={() => setSearchText('')}>مسح البحث</button>
+        <label>
+          المدرسة
+          <select value={filterSchoolId} onChange={event => setFilterSchoolId(event.target.value)}>
+            <option value="">كل المدارس</option>
+            {schools.map(school => <option key={school.id} value={school.id}>{school.name}</option>)}
+          </select>
+        </label>
+        <label>
+          الصف
+          <select value={filterGrade} onChange={event => setFilterGrade(event.target.value)}>
+            <option value="">كل الصفوف</option>
+            {grades.map(grade => <option key={grade} value={grade}>{grade}</option>)}
+          </select>
+        </label>
+        <label>
+          الحالة
+          <select value={filterStatus} onChange={event => setFilterStatus(event.target.value)}>
+            <option value="">كل الحالات</option>
+            <option value="ACTIVE">نشط</option>
+            <option value="SUSPENDED">موقوف</option>
+            <option value="INACTIVE">مؤرشف</option>
+          </select>
+        </label>
+        <label className="check-control"><input type="checkbox" checked={lowBalanceOnly} onChange={event => setLowBalanceOnly(event.target.checked)} /> رصيد فسحة منخفض</label>
         <small className="form-note">النتائج: {visibleStudents.length} من {students.length}</small>
       </form>
 
@@ -160,6 +199,7 @@ export default function Students() {
             <th>الصف</th>
             <th>المدرسة</th>
             <th>الحد اليومي</th>
+            <th>الحالة</th>
             <th>رصيد الفسحة</th>
             <th>بطاقة QR</th>
             <th>الإجراء</th>
@@ -176,6 +216,7 @@ export default function Students() {
                 <td>{student.grade}</td>
                 <td>{student.school.name}</td>
                 <td>{student.dailyLimit} ر.س</td>
+                <td>{student.status}</td>
                 <td>{student.wallet ? `${student.wallet.balance} ${student.wallet.currency}` : '—'}</td>
                 <td>
                   {token ? (
@@ -192,13 +233,14 @@ export default function Students() {
                 <td>
                   <div className="row-actions">
                     <a className="table-link" href={`/students/${student.id}`}>تفاصيل</a>
+                    <a className="table-link" href={`/wallets?studentId=${student.id}`}>تخصيص فسحة</a>
                     <button type="button" onClick={() => setEditing(student)}>تعديل</button>
                   </div>
                 </td>
               </tr>
             );
           })}
-          {!visibleStudents.length && <tr><td colSpan={8}>لا توجد نتائج مطابقة للبحث.</td></tr>}
+          {!visibleStudents.length && <tr><td colSpan={9}>لا توجد نتائج مطابقة للبحث.</td></tr>}
         </tbody>
       </table>
     </AdminShell>

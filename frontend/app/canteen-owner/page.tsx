@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import BrandLogo from '../components/BrandLogo';
 import LogoutButton from '../components/LogoutButton';
 import { apiFetch } from '../lib/api';
@@ -54,7 +54,13 @@ export default function CanteenOwnerPage() {
   const [summaries, setSummaries] = useState<Summary[]>([]);
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [totals, setTotals] = useState<OwnerSummary['totals'] | null>(null);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [message, setMessage] = useState('جاري تحميل بيانات المقاصف...');
+  const visibleSettlements = useMemo(() => settlements.filter(item => {
+    const date = item.createdAt.slice(0, 10);
+    return (!startDate || date >= startDate) && (!endDate || date <= endDate);
+  }), [endDate, settlements, startDate]);
 
   useEffect(() => {
     const load = async () => {
@@ -96,6 +102,7 @@ export default function CanteenOwnerPage() {
             <span>هنا تظهر بيانات المقاصف التابعة لك فقط: مستحقات الفسحة الحالية والمبالغ التي تمت تسويتها من الجمعية</span>
           </div>
           <div className="owner-actions">
+            <button type="button" className="secondary" onClick={() => print()}>تقرير PDF</button>
             <LogoutButton />
           </div>
         </header>
@@ -146,6 +153,12 @@ export default function CanteenOwnerPage() {
         </table>
 
         <h2>آخر التسويات</h2>
+        <form className="entry student-tools">
+          <label>من تاريخ<input type="date" value={startDate} onChange={event => setStartDate(event.target.value)} /></label>
+          <label>إلى تاريخ<input type="date" value={endDate} onChange={event => setEndDate(event.target.value)} /></label>
+          <button type="button" className="secondary" onClick={() => { setStartDate(''); setEndDate(''); }}>مسح الفترة</button>
+          <small className="form-note">التسويات المعروضة: {visibleSettlements.length}</small>
+        </form>
         <table>
           <thead>
             <tr>
@@ -159,7 +172,7 @@ export default function CanteenOwnerPage() {
             </tr>
           </thead>
           <tbody>
-            {settlements.map(settlement => (
+            {visibleSettlements.map(settlement => (
               <tr key={settlement.id}>
                 <td>{new Date(settlement.createdAt).toLocaleString('ar-SA')}</td>
                 <td>{settlement.canteen?.name ?? 'مقصف عام'}</td>

@@ -9,18 +9,23 @@ type Student = {
   id: string;
   fullName: string;
   studentCode: string;
+  grade: string;
   schoolId: string;
   school: { name: string };
   wallet: { balance: string; currency: string } | null;
 };
 
 type BulkResponse = { batch?: { count: number; amountPerStudent: string; totalAmount: string }; error?: string };
+const formDataValue = (form: HTMLFormElement, key: string) => String(new FormData(form).get(key) ?? '');
 
 export default function Wallets() {
   const [schools, setSchools] = useState<School[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [selectedSchoolId, setSelectedSchoolId] = useState('');
+  const [singleStudentId, setSingleStudentId] = useState('');
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
+  const [selectedGrade, setSelectedGrade] = useState('');
+  const [bulkAmount, setBulkAmount] = useState('');
   const [message, setMessage] = useState('');
 
   const activeSchools = useMemo(() => schools.filter(school => school.status === 'ACTIVE'), [schools]);
@@ -32,6 +37,10 @@ export default function Wallets() {
     () => schools.find(school => school.id === selectedSchoolId),
     [schools, selectedSchoolId]
   );
+  const schoolGrades = useMemo(() => [...new Set(schoolStudents.map(student => student.grade).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ar', { numeric: true })), [schoolStudents]);
+  const gradeStudents = useMemo(() => selectedGrade ? schoolStudents.filter(student => student.grade === selectedGrade) : [], [schoolStudents, selectedGrade]);
+  const previewCount = selectedStudentIds.length || gradeStudents.length || schoolStudents.length;
+  const previewTotal = bulkAmount ? (Number(bulkAmount) * previewCount).toFixed(2) : '0.00';
 
   const load = async () => {
     const [studentsResponse, schoolsResponse] = await Promise.all([
@@ -48,6 +57,8 @@ export default function Wallets() {
 
     setStudents(nextStudents);
     setSchools(nextSchools);
+    const requestedStudentId = new URLSearchParams(location.search).get('studentId') ?? '';
+    if (requestedStudentId && nextStudents.some(student => student.id === requestedStudentId)) setSingleStudentId(requestedStudentId);
     setSelectedSchoolId(current => current || nextSchools.find(school => school.status === 'ACTIVE')?.id || '');
   };
 
@@ -73,13 +84,14 @@ export default function Wallets() {
     void load();
   }
 
-  async function submitBulk(e: FormEvent<HTMLFormElement>, mode: 'school' | 'selected') {
+  async function submitBulk(e: FormEvent<HTMLFormElement>, mode: 'school' | 'grade' | 'selected') {
     e.preventDefault();
     const form = e.currentTarget;
     const amount = String(new FormData(form).get('amount') ?? '');
 
     if (!selectedSchoolId) return setMessage('اختر المدرسة أولًا.');
     if (mode === 'selected' && selectedStudentIds.length === 0) return setMessage('حدد طالبًا واحدًا على الأقل.');
+    if (mode === 'grade' && !selectedGrade) return setMessage('اختر الصف أولًا.');
     if (mode === 'school' && !confirm(`سيتم تخصيص مبلغ فسحة لـ ${schoolStudents.length} طالب/طالبة في ${selectedSchool?.name ?? 'المدرسة المختارة'}. هل أنت متأكد؟`)) return;
 
     const response = await apiFetch('/wallets/bulk-top-up', {
@@ -88,6 +100,8 @@ export default function Wallets() {
       body: JSON.stringify({
         schoolId: selectedSchoolId,
         amount,
+        reason: formDataValue(form, 'reason'),
+        ...(mode === 'grade' ? { grade: selectedGrade } : {}),
         ...(mode === 'selected' ? { studentIds: selectedStudentIds } : {})
       })
     });
@@ -124,11 +138,17 @@ export default function Wallets() {
           <span>مناسب للحالات السريعة</span>
         </div>
         <form className="entry" onSubmit={submitSingle}>
-          <select name="studentId" required defaultValue="">
+          <select name="studentId" required value={singleStudentId} onChange={event => setSingleStudentId(event.target.value)}>
             <option value="" disabled>اختر الطالب</option>
             {students.map(student => <option key={student.id} value={student.id}>{student.fullName} — {student.studentCode} — {student.school.name}</option>)}
           </select>
           <input name="amount" type="number" min="0.01" step="0.01" placeholder="قيمة مخصص الفسحة بالريال" required />
+          <select name="reason" defaultValue="شهري">
+            <option value="شهري">شهري</option>
+            <option value="إضافي">إضافي</option>
+            <option value="دعم خاص">دعم خاص</option>
+            <option value="تصحيح">تصحيح</option>
+          </select>
           <button>اعتماد المبلغ</button>
         </form>
       </section>
@@ -150,15 +170,29 @@ export default function Wallets() {
 
           <div className="bulk-actions">
             <form className="mini-form" onSubmit={event => void submitBulk(event, 'school')}>
-              <input name="amount" type="number" min="0.01" step="0.01" placeholder="مبلغ فسحة لكل طالب" required />
+              <input name="amount" type="number" min="0.01" step="0.01" placeholder="مبلغ فسحة لكل طالب" required onChange={event => setBulkAmount(event.target.value)} />
+              <select name="reason" defaultValue="شهري"><option value="شهري">شهري</option><option value="إضافي">إضافي</option><option value="دعم خاص">دعم خاص</option><option value="تصحيح">تصحيح</option></select>
               <button disabled={!selectedSchoolId || schoolStudents.length === 0}>تخصيص لكل طلاب المدرسة</button>
             </form>
 
+            <form className="mini-form" onSubmit={event => void submitBulk(event, 'grade')}>
+              <select value={selectedGrade} onChange={event => setSelectedGrade(event.target.value)}>
+                <option value="">اختر الصف</option>
+                {schoolGrades.map(grade => <option key={grade} value={grade}>{grade}</option>)}
+              </select>
+              <input name="amount" type="number" min="0.01" step="0.01" placeholder="مبلغ فسحة لكل طالب في الصف" required onChange={event => setBulkAmount(event.target.value)} />
+              <select name="reason" defaultValue="شهري"><option value="شهري">شهري</option><option value="إضافي">إضافي</option><option value="دعم خاص">دعم خاص</option><option value="تصحيح">تصحيح</option></select>
+              <button disabled={!selectedSchoolId || !selectedGrade || gradeStudents.length === 0}>تخصيص الصف ({gradeStudents.length})</button>
+            </form>
+
             <form className="mini-form" onSubmit={event => void submitBulk(event, 'selected')}>
-              <input name="amount" type="number" min="0.01" step="0.01" placeholder="مبلغ فسحة لكل طالب محدد" required />
+              <input name="amount" type="number" min="0.01" step="0.01" placeholder="مبلغ فسحة لكل طالب محدد" required onChange={event => setBulkAmount(event.target.value)} />
+              <select name="reason" defaultValue="شهري"><option value="شهري">شهري</option><option value="إضافي">إضافي</option><option value="دعم خاص">دعم خاص</option><option value="تصحيح">تصحيح</option></select>
               <button disabled={!selectedSchoolId || selectedStudentIds.length === 0}>تخصيص للطلاب المحددين ({selectedStudentIds.length})</button>
             </form>
           </div>
+
+          <p className="form-note">معاينة الاعتماد: {previewCount} طالب/طالبة — إجمالي تقريبي {previewTotal} ر.س.</p>
 
           <div className="row-actions">
             <button type="button" className="secondary" onClick={selectAllSchoolStudents} disabled={!selectedSchoolId || schoolStudents.length === 0}>تحديد كل طلاب المدرسة</button>

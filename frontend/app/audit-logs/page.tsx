@@ -21,23 +21,40 @@ const pretty = (value: unknown) => value ? JSON.stringify(value) : '—';
 
 export default function AuditLogs() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [action, setAction] = useState('');
+  const [entity, setEntity] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [message, setMessage] = useState('');
 
-  useEffect(() => {
-    const load = async () => {
-      const response = await apiFetch('/audit-logs');
+  const load = async () => {
+      const query = new URLSearchParams({ ...(action ? { action } : {}), ...(entity ? { entity } : {}), ...(startDate ? { startDate } : {}), ...(endDate ? { endDate } : {}) });
+      const response = await apiFetch(`/audit-logs${query.toString() ? `?${query}` : ''}`);
       if (response.status === 401) return location.assign('/login');
       if (!response.ok) return setMessage('هذا الحساب لا يملك صلاحية عرض سجل التدقيق.');
 
       const data: { logs?: AuditLog[] } = await response.json();
       setLogs(Array.isArray(data.logs) ? data.logs : []);
     };
-    void load();
-  }, []);
+
+  useEffect(() => { void load(); }, []);
+
+  function exportLogs() {
+    const query = new URLSearchParams({ ...(action ? { action } : {}), ...(entity ? { entity } : {}), ...(startDate ? { startDate } : {}), ...(endDate ? { endDate } : {}) });
+    location.assign(`/api/v1/audit-logs.csv${query.toString() ? `?${query}` : ''}`);
+  }
 
   return (
     <AdminShell>
       <header><div><h1>سجل التدقيق</h1><a href="/transactions">← سجل العمليات</a></div></header>
+      <form className="entry student-tools">
+        <label>الإجراء<input value={action} onChange={event => setAction(event.target.value)} placeholder="مثال: STUDENT_UPDATED" /></label>
+        <label>الكيان<input value={entity} onChange={event => setEntity(event.target.value)} placeholder="Student / School / WalletTransaction" /></label>
+        <label>من تاريخ<input type="date" value={startDate} onChange={event => setStartDate(event.target.value)} /></label>
+        <label>إلى تاريخ<input type="date" value={endDate} onChange={event => setEndDate(event.target.value)} /></label>
+        <button type="button" onClick={() => void load()}>تطبيق الفلاتر</button>
+        <button type="button" className="secondary" onClick={exportLogs}>تصدير السجل</button>
+      </form>
       {message && <p role="status">{message}</p>}
       <table>
         <thead><tr><th>الوقت</th><th>الإجراء</th><th>الكيان</th><th>المدرسة</th><th>المستخدم</th><th>IP</th><th>قبل</th><th>بعد</th></tr></thead>

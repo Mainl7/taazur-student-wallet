@@ -108,6 +108,21 @@ const parseMonthRange = (month?: unknown) => {
   const end = new Date(year, monthNumber, 1);
   return { text, start, end };
 };
+const parseDateRange = (query: Record<string, unknown>) => {
+  const start = parseLocalDate(query.startDate);
+  const endDay = parseLocalDate(query.endDate);
+  const createdAt: Prisma.DateTimeFilter = {};
+  if (start) createdAt.gte = start;
+  if (endDay) createdAt.lt = new Date(endDay.getTime() + dayMs);
+  return Object.keys(createdAt).length ? createdAt : undefined;
+};
+const transactionTypeLabel = (type: TransactionType | string) => ({
+  CREDIT: 'تخصيص فسحة',
+  DEBIT: 'صرف مقصف',
+  REFUND: 'استرجاع',
+  REVERSAL: 'عكس',
+  ADJUSTMENT: 'تعديل'
+}[type] ?? type);
 
 function scopedSchoolFromQuery(req: Request) {
   const requested = typeof req.query.schoolId === 'string' && req.query.schoolId ? req.query.schoolId : undefined;
@@ -275,6 +290,50 @@ app.get('/api/v1/schools', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN,
     const where = req.claims!.schoolId ? { id: req.claims!.schoolId } : {};
     const schools = await prisma.school.findMany({ where, orderBy: { name: 'asc' }, select: { id: true, schoolCode: true, name: true, city: true, district: true, status: true, _count: { select: { students: true } } } });
     res.json({ schools });
+  } catch (error) { next(error); }
+});
+app.get('/api/v1/schools/:schoolId/details', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
+  try {
+    const schoolId = routeParam(req.params.schoolId);
+    if (!scopedSchool(req.claims!, schoolId)) return res.status(403).json({ error: 'SCHOOL_SCOPE_DENIED' });
+    const today = startOfToday();
+    const month = startOfThisMonth();
+    const [
+      school,
+      studentCount,
+      activeStudentCount,
+      walletBalance,
+      todaySpent,
+      monthSpent,
+      canteens,
+      lowBalanceCount,
+      revokedCards
+    ] = await Promise.all([
+      prisma.school.findUniqueOrThrow({ where: { id: schoolId }, select: { id: true, schoolCode: true, name: true, city: true, district: true, address: true, status: true, createdAt: true } }),
+      prisma.student.count({ where: { schoolId } }),
+      prisma.student.count({ where: { schoolId, status: EntityStatus.ACTIVE } }),
+      prisma.wallet.aggregate({ where: { student: { schoolId } }, _sum: { balance: true } }),
+      prisma.walletTransaction.aggregate({ where: { schoolId, type: TransactionType.DEBIT, createdAt: { gte: today } }, _sum: { amount: true }, _count: { id: true } }),
+      prisma.walletTransaction.aggregate({ where: { schoolId, type: TransactionType.DEBIT, createdAt: { gte: month } }, _sum: { amount: true }, _count: { id: true } }),
+      prisma.canteen.findMany({ where: { schoolId }, select: { id: true, name: true, canteenCode: true, status: true, operator: { select: { email: true } } }, orderBy: { name: 'asc' } }),
+      prisma.wallet.count({ where: { balance: { lt: 10 }, student: { schoolId, status: EntityStatus.ACTIVE } } }),
+      prisma.card.count({ where: { status: CardStatus.REVOKED, student: { schoolId } } })
+    ]);
+    res.json({
+      school,
+      metrics: {
+        students: studentCount,
+        activeStudents: activeStudentCount,
+        walletBalance: asMoney(walletBalance._sum.balance),
+        todaySpent: asMoney(todaySpent._sum.amount),
+        todayTransactions: todaySpent._count.id,
+        monthSpent: asMoney(monthSpent._sum.amount),
+        monthTransactions: monthSpent._count.id,
+        lowBalanceCount,
+        revokedCards
+      },
+      canteens
+    });
   } catch (error) { next(error); }
 });
 app.post('/api/v1/schools', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN), async (req, res, next) => {
@@ -464,7 +523,7 @@ app.post('/api/v1/canteens', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
 });
 
 const studentSchema = z.object({ studentCode: z.string().trim().min(3).max(32), fullName: z.string().trim().min(3).max(150), grade: z.string().trim().min(1).max(32), className: z.string().trim().max(32).optional(), schoolId: z.string().cuid(), dailyLimit: z.coerce.number().positive().max(500), weeklyLimit: z.coerce.number().positive().max(2000).optional() });
-const studentUpdateSchema = studentSchema.pick({ studentCode: true, fullName: true, grade: true, schoolId: true, dailyLimit: true }).partial();
+const studentUpdateSchema = studentSchema.extend({ status: z.nativeEnum(EntityStatus).optional() }).partial();
 app.get('/api/v1/students', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
   try {
     const schoolId = typeof req.query.schoolId === 'string' ? req.query.schoolId : req.claims!.schoolId;
@@ -564,16 +623,18 @@ app.post('/api/v1/students/:studentId/cards', auth, roles(Role.SUPER_ADMIN, Role
 app.get('/api/v1/cards', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
   try {
     const schoolId = req.claims!.schoolId;
-    const cards = await prisma.card.findMany({ where: schoolId ? { student: { schoolId } } : {}, include: { student: { select: { id: true, fullName: true, studentCode: true, school: { select: { name: true } } } } }, orderBy: { issuedAt: 'desc' } });
+    const cards = await prisma.card.findMany({ where: schoolId ? { student: { schoolId } } : {}, include: { student: { select: { id: true, fullName: true, studentCode: true, grade: true, school: { select: { id: true, name: true } } } } }, orderBy: { issuedAt: 'desc' } });
     res.json({ cards });
   } catch (error) { next(error); }
 });
 
-const topUpSchema = z.object({ studentId: z.string().cuid(), amount: z.coerce.number().positive().max(10000) });
+const topUpSchema = z.object({ studentId: z.string().cuid(), amount: z.coerce.number().positive().max(10000), reason: z.string().trim().max(80).optional() });
 const bulkTopUpSchema = z.object({
   schoolId: z.string().cuid(),
   amount: z.coerce.number().positive().max(10000),
-  studentIds: z.array(z.string().cuid()).max(500).optional()
+  grade: z.string().trim().max(32).optional(),
+  studentIds: z.array(z.string().cuid()).max(500).optional(),
+  reason: z.string().trim().max(80).optional()
 });
 app.post('/api/v1/wallets/top-up', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN), async (req, res, next) => {
   try {
@@ -589,7 +650,7 @@ app.post('/api/v1/wallets/top-up', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATIO
       const balanceAfter = balanceBefore + input.amount;
       await tx.wallet.update({ where: { id: wallet.id }, data: { balance: balanceAfter } });
       const created = await tx.walletTransaction.create({ data: { reference: randomUUID(), walletId: wallet.id, studentId: student.id, schoolId: student.schoolId, amount: input.amount, type: TransactionType.CREDIT, balanceBefore, balanceAfter, performedById: req.claims!.sub } });
-      await audit(tx, req, { action: 'WALLET_TOP_UP', entity: 'WalletTransaction', entityId: created.id, schoolId: student.schoolId, newValue: cleanJson({ studentId: student.id, amount: input.amount, balanceBefore, balanceAfter }) });
+      await audit(tx, req, { action: 'WALLET_TOP_UP', entity: 'WalletTransaction', entityId: created.id, schoolId: student.schoolId, newValue: cleanJson({ studentId: student.id, amount: input.amount, reason: input.reason, balanceBefore, balanceAfter }) });
       return created;
     });
     res.status(201).json({ transaction });
@@ -607,6 +668,7 @@ app.post('/api/v1/wallets/bulk-top-up', auth, roles(Role.SUPER_ADMIN, Role.ASSOC
     const where = {
       schoolId: input.schoolId,
       status: EntityStatus.ACTIVE,
+      ...(input.grade ? { grade: input.grade } : {}),
       ...(uniqueStudentIds.length ? { id: { in: uniqueStudentIds } } : {})
     };
 
@@ -649,7 +711,7 @@ app.post('/api/v1/wallets/bulk-top-up', auth, roles(Role.SUPER_ADMIN, Role.ASSOC
           entity: 'WalletTransaction',
           entityId: created.id,
           schoolId: student.schoolId,
-          newValue: cleanJson({ studentId: student.id, amount: input.amount, balanceBefore, balanceAfter, schoolId: input.schoolId })
+          newValue: cleanJson({ studentId: student.id, amount: input.amount, reason: input.reason, balanceBefore, balanceAfter, schoolId: input.schoolId, grade: input.grade })
         });
         transactions.push(created);
       }
@@ -662,7 +724,9 @@ app.post('/api/v1/wallets/bulk-top-up', auth, roles(Role.SUPER_ADMIN, Role.ASSOC
         newValue: cleanJson({
           schoolId: school.id,
           schoolName: school.name,
-          mode: uniqueStudentIds.length ? 'SELECTED_STUDENTS' : 'WHOLE_SCHOOL',
+          mode: uniqueStudentIds.length ? 'SELECTED_STUDENTS' : input.grade ? 'GRADE' : 'WHOLE_SCHOOL',
+          reason: input.reason,
+          grade: input.grade,
           amountPerStudent: input.amount,
           studentCount: students.length,
           totalAmount: input.amount * students.length
@@ -682,12 +746,27 @@ app.post('/api/v1/wallets/bulk-top-up', auth, roles(Role.SUPER_ADMIN, Role.ASSOC
 });
 app.get('/api/v1/transactions', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
   try {
-    const schoolId = typeof req.query.schoolId === 'string' ? req.query.schoolId : req.claims!.schoolId;
+    const schoolId = scopedSchoolFromQuery(req);
     const studentId = typeof req.query.studentId === 'string' ? req.query.studentId : undefined;
+    const canteenId = typeof req.query.canteenId === 'string' ? req.query.canteenId : undefined;
+    const reference = typeof req.query.reference === 'string' ? req.query.reference.trim() : '';
     const type = typeof req.query.type === 'string' && Object.values(TransactionType).includes(req.query.type as TransactionType) ? req.query.type as TransactionType : undefined;
-    if (schoolId && !scopedSchool(req.claims!, schoolId)) return res.status(403).json({ error: 'SCHOOL_SCOPE_DENIED' });
-    const transactions = await prisma.walletTransaction.findMany({ where: { ...(schoolId ? { schoolId } : {}), ...(studentId ? { studentId } : {}), ...(type ? { type } : {}) }, include: { school: { select: { name: true } }, performedBy: { select: { email: true } } }, orderBy: { createdAt: 'desc' }, take: 200 });
-    const totals = await prisma.walletTransaction.groupBy({ by: ['type'], where: { ...(schoolId ? { schoolId } : {}), ...(studentId ? { studentId } : {}) }, _sum: { amount: true } });
+    const createdAt = parseDateRange(req.query as Record<string, unknown>);
+    const where: Prisma.WalletTransactionWhereInput = {
+      ...(schoolId ? { schoolId } : {}),
+      ...(studentId ? { studentId } : {}),
+      ...(canteenId ? { canteenId } : {}),
+      ...(type ? { type } : {}),
+      ...(reference ? { reference: { contains: reference } } : {}),
+      ...(createdAt ? { createdAt } : {})
+    };
+    const transactions = await prisma.walletTransaction.findMany({
+      where,
+      include: { school: { select: { name: true } }, canteen: { select: { id: true, name: true } }, performedBy: { select: { email: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 500
+    });
+    const totals = await prisma.walletTransaction.groupBy({ by: ['type'], where, _sum: { amount: true } });
     const studentIds = [...new Set(transactions.map(transaction => transaction.studentId))];
     const students = await prisma.student.findMany({ where: { id: { in: studentIds } }, select: { id: true, fullName: true, studentCode: true } });
     const studentMap = new Map(students.map(student => [student.id, student]));
@@ -1419,6 +1498,29 @@ app.get('/api/v1/canteen/summary', auth, roles(Role.CANTEEN_CASHIER, Role.CANTEE
   } catch (error) { next(error); }
 });
 
+app.get('/api/v1/canteen/recent-transactions', auth, roles(Role.CANTEEN_CASHIER, Role.CANTEEN_OPERATOR), async (req, res, next) => {
+  try {
+    await assertNotCanteenOwner(prisma, req.claims!);
+    const canteenId = typeof req.query.canteenId === 'string' ? req.query.canteenId : undefined;
+    const canteen = await resolveCanteenAccess(prisma, req.claims!, canteenId);
+    const transactions = await prisma.walletTransaction.findMany({
+      where: {
+        schoolId: canteen.schoolId,
+        performedById: req.claims!.sub,
+        type: { in: [TransactionType.DEBIT, TransactionType.REFUND] },
+        ...(canteen.canteenId ? { canteenId: canteen.canteenId } : {})
+      },
+      include: { canteen: { select: { name: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 10
+    });
+    const studentIds = [...new Set(transactions.map(transaction => transaction.studentId))];
+    const students = await prisma.student.findMany({ where: { id: { in: studentIds } }, select: { id: true, fullName: true, studentCode: true } });
+    const studentMap = new Map(students.map(student => [student.id, student]));
+    res.json({ transactions: transactions.map(transaction => ({ ...transaction, student: studentMap.get(transaction.studentId) })) });
+  } catch (error) { next(error); }
+});
+
 app.get('/api/v1/canteen/owner-summary', auth, roles(Role.CANTEEN_OWNER, Role.CANTEEN_OPERATOR), async (req, res, next) => {
   try {
     const canteens = await prisma.canteen.findMany({
@@ -1486,7 +1588,7 @@ app.get('/api/v1/canteen/settlements', auth, roles(Role.SUPER_ADMIN, Role.ASSOCI
 
 app.post('/api/v1/canteen/settlements', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN), async (req, res, next) => {
   try {
-    const input = z.object({ canteenId: z.string().cuid().optional(), canteenUserId: z.string().cuid().optional(), note: z.string().trim().max(200).optional() }).parse(req.body);
+    const input = z.object({ canteenId: z.string().cuid().optional(), canteenUserId: z.string().cuid().optional(), note: z.string().trim().max(200).optional(), receiptNumber: z.string().trim().max(80).optional() }).parse(req.body);
     if (!input.canteenId && !input.canteenUserId) return res.status(400).json({ error: 'CANTEEN_REQUIRED' });
     const due = input.canteenId ? await canteenDueByCanteen(input.canteenId, req.claims!) : await canteenDueByUser(input.canteenUserId!, req.claims!);
     const amount = money(due.net);
@@ -1501,12 +1603,12 @@ app.post('/api/v1/canteen/settlements', auth, roles(Role.SUPER_ADMIN, Role.ASSOC
           transactionCount: due.transactionCount,
           periodStart: due.periodStart,
           periodEnd: due.periodEnd,
-          note: input.note,
+          note: [input.receiptNumber ? `رقم الإيصال/الحوالة: ${input.receiptNumber}` : '', input.note ?? ''].filter(Boolean).join(' — ') || undefined,
           settledById: req.claims!.sub
         },
         include: { canteen: { select: { name: true, canteenCode: true } }, canteenUser: { select: { email: true } }, settledBy: { select: { email: true } }, school: { select: { name: true } } }
       });
-      await audit(tx, req, { action: 'CANTEEN_SETTLED', entity: 'CanteenSettlement', entityId: created.id, schoolId: created.schoolId, newValue: cleanJson({ canteenId: created.canteenId, canteenUserId: created.canteenUserId, amount, transactionCount: due.transactionCount }) });
+      await audit(tx, req, { action: 'CANTEEN_SETTLED', entity: 'CanteenSettlement', entityId: created.id, schoolId: created.schoolId, newValue: cleanJson({ canteenId: created.canteenId, canteenUserId: created.canteenUserId, amount, transactionCount: due.transactionCount, receiptNumber: input.receiptNumber }) });
       return created;
     });
     res.status(201).json({ settlement });
@@ -1515,13 +1617,50 @@ app.post('/api/v1/canteen/settlements', auth, roles(Role.SUPER_ADMIN, Role.ASSOC
 
 app.get('/api/v1/audit-logs', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
   try {
+    const createdAt = parseDateRange(req.query as Record<string, unknown>);
+    const action = typeof req.query.action === 'string' ? req.query.action.trim() : '';
+    const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : '';
+    const entity = typeof req.query.entity === 'string' ? req.query.entity.trim() : '';
+    const schoolId = scopedSchoolFromQuery(req);
     const logs = await prisma.auditLog.findMany({
-      where: req.claims!.schoolId ? { schoolId: req.claims!.schoolId } : {},
+      where: {
+        ...(schoolId ? { schoolId } : {}),
+        ...(createdAt ? { timestamp: createdAt } : {}),
+        ...(action ? { action } : {}),
+        ...(userId ? { userId } : {}),
+        ...(entity ? { entity } : {})
+      },
       include: { user: { select: { email: true, schoolId: true } }, school: { select: { name: true, schoolCode: true } } },
       orderBy: { timestamp: 'desc' },
-      take: 200
+      take: 500
     });
     res.json({ logs });
+  } catch (error) { next(error); }
+});
+
+app.get('/api/v1/audit-logs.csv', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
+  try {
+    const createdAt = parseDateRange(req.query as Record<string, unknown>);
+    const action = typeof req.query.action === 'string' ? req.query.action.trim() : '';
+    const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : '';
+    const entity = typeof req.query.entity === 'string' ? req.query.entity.trim() : '';
+    const schoolId = scopedSchoolFromQuery(req);
+    const logs = await prisma.auditLog.findMany({
+      where: {
+        ...(schoolId ? { schoolId } : {}),
+        ...(createdAt ? { timestamp: createdAt } : {}),
+        ...(action ? { action } : {}),
+        ...(userId ? { userId } : {}),
+        ...(entity ? { entity } : {})
+      },
+      include: { user: { select: { email: true } }, school: { select: { name: true, schoolCode: true } } },
+      orderBy: { timestamp: 'desc' },
+      take: 1000
+    });
+    sendCsv(res, 'taazur-audit-logs.csv', [
+      ['الوقت', 'الإجراء', 'الكيان', 'معرف الكيان', 'المدرسة', 'المستخدم', 'IP', 'قبل', 'بعد'],
+      ...logs.map(log => [log.timestamp.toLocaleString('ar-SA'), log.action, log.entity, log.entityId, log.school ? `${log.school.name} — ${log.school.schoolCode}` : '—', log.user?.email ?? 'النظام', log.ip ?? '—', JSON.stringify(log.oldValue ?? ''), JSON.stringify(log.newValue ?? '')])
+    ]);
   } catch (error) { next(error); }
 });
 

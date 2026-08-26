@@ -39,6 +39,7 @@ function Empty() {
 
 export default function AlertsPage() {
   const [alerts, setAlerts] = useState<Alerts | null>(null);
+  const [reviewedIds, setReviewedIds] = useState<string[]>([]);
   const [message, setMessage] = useState('');
 
   const load = async () => {
@@ -50,6 +51,17 @@ export default function AlertsPage() {
   };
 
   useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    setReviewedIds(JSON.parse(localStorage.getItem('taazur_reviewed_alerts') ?? '[]'));
+  }, []);
+
+  function markReviewed(id: string) {
+    const next = [...new Set([...reviewedIds, id])];
+    setReviewedIds(next);
+    localStorage.setItem('taazur_reviewed_alerts', JSON.stringify(next));
+  }
+
+  const activeItems = alerts?.items?.filter(item => !reviewedIds.includes(item.id)) ?? [];
 
   return (
     <AdminShell>
@@ -69,15 +81,16 @@ export default function AlertsPage() {
           <span>مرتبة حسب الخطورة ثم الأحدث</span>
         </div>
         <div className="alert-timeline">
-          {alerts?.items?.length ? alerts.items.map(item => (
-            <a className={`alert-row ${item.severity}`} href={item.href} key={item.id}>
+          {activeItems.length ? activeItems.map(item => (
+            <div className={`alert-row ${item.severity}`} key={item.id}>
               <span className="alert-badge">{item.severity === 'danger' ? 'عاجل' : item.severity === 'warn' ? 'تنبيه' : 'معلومة'}</span>
               <span>
-                <strong>{item.title}</strong>
+                <a href={item.href}><strong>{item.title}</strong></a>
                 <small>{item.description}</small>
               </span>
               <b>{item.metric}</b>
-            </a>
+              <button type="button" className="secondary" onClick={() => markReviewed(item.id)}>تمت المراجعة</button>
+            </div>
           )) : <p className="empty-state">لا توجد تنبيهات تحتاج إجراء الآن.</p>}
         </div>
       </section>

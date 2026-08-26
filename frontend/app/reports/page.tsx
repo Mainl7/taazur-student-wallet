@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import AdminShell from '../components/AdminShell';
 import { apiFetch } from '../lib/api';
 
@@ -11,30 +11,48 @@ type DayItem = { date: string; debit: string; refund: string; net: string; count
 type InactiveStudent = { id: string; fullName: string; studentCode: string; schoolName: string };
 type Usage = { studentId: string; fullName: string; studentCode: string; schoolName: string; dailyCount: number; weeklyCount: number; monthlyCount: number; monthlyAmount: string };
 type Report = { spendingBySchool: Spending[]; topStudents: TopItem[]; topSchools: TopItem[]; canteenByDay: DayItem[]; inactiveStudents: InactiveStudent[]; studentUsage: Usage[] };
+type School = { id: string; name: string; schoolCode: string };
 
 const currentMonth = new Date().toISOString().slice(0, 7);
 
 export default function ReportsPage() {
   const [month, setMonth] = useState(currentMonth);
+  const [schoolId, setSchoolId] = useState('');
+  const [schools, setSchools] = useState<School[]>([]);
   const [report, setReport] = useState<Report | null>(null);
   const [message, setMessage] = useState('');
+  const query = useMemo(() => new URLSearchParams({ month, ...(schoolId ? { schoolId } : {}) }).toString(), [month, schoolId]);
 
   const load = async () => {
-    const response = await apiFetch(`/reports/summary?month=${month}`);
+    const response = await apiFetch(`/reports/summary?${query}`);
     if (response.status === 401) return location.assign('/login');
     if (!response.ok) return setMessage('تعذر تحميل التقارير.');
     setReport(await response.json());
     setMessage('');
   };
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    const boot = async () => {
+      const schoolsResponse = await apiFetch('/schools');
+      if (schoolsResponse.status === 401) return location.assign('/login');
+      const schoolData: { schools?: School[] } = await schoolsResponse.json();
+      setSchools(Array.isArray(schoolData.schools) ? schoolData.schools : []);
+      await load();
+    };
+    void boot();
+  }, []);
 
   return (
     <AdminShell>
       <header>
         <div><h1>التقارير</h1><span>مصروفات المدارس واستخدام الطلاب وعمليات المقصف</span></div>
-        <label>الشهر<input type="month" value={month} onChange={event => setMonth(event.target.value)} /></label>
-        <button onClick={() => void load()}>تحديث التقرير</button>
+        <div className="row-actions">
+          <label>الشهر<input type="month" value={month} onChange={event => setMonth(event.target.value)} /></label>
+          <label>المدرسة<select value={schoolId} onChange={event => setSchoolId(event.target.value)}><option value="">كل المدارس</option>{schools.map(school => <option key={school.id} value={school.id}>{school.name} — {school.schoolCode}</option>)}</select></label>
+          <button onClick={() => void load()}>تحديث التقرير</button>
+          <a href={`/exports/monthly-expenses.xls?${query}`}>Excel</a>
+          <a href={`/exports/monthly-expenses-print?${query}`} target="_blank">PDF</a>
+        </div>
       </header>
       {message && <p role="status">{message}</p>}
 

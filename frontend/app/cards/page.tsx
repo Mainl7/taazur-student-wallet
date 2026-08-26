@@ -15,17 +15,32 @@ type Card = {
     id: string;
     fullName: string;
     studentCode: string;
-    school: { name: string };
+    grade: string;
+    school: { id: string; name: string };
   };
 };
 
 export default function Cards() {
   const [cards, setCards] = useState<Card[]>([]);
+  const [schoolId, setSchoolId] = useState('');
+  const [grade, setGrade] = useState('');
+  const [status, setStatus] = useState('ACTIVE');
+  const [printMode, setPrintMode] = useState<'business' | 'a4' | 'labels'>('business');
   const [message, setMessage] = useState('');
   const activeStudentIds = useMemo(
     () => new Set(cards.filter(card => card.status === 'ACTIVE').map(card => card.student.id)),
     [cards]
   );
+  const schools = useMemo(() => {
+    const items = new Map<string, string>();
+    cards.forEach(card => items.set(card.student.school.id, card.student.school.name));
+    return [...items.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+  }, [cards]);
+  const grades = useMemo(() => [...new Set(cards.map(card => card.student.grade).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ar', { numeric: true })), [cards]);
+  const visibleCards = useMemo(() => cards
+    .filter(card => !schoolId || card.student.school.id === schoolId)
+    .filter(card => !grade || card.student.grade === grade)
+    .filter(card => !status || card.status === status), [cards, grade, schoolId, status]);
 
   const load = async () => {
     const response = await apiFetch('/cards');
@@ -58,6 +73,10 @@ export default function Cards() {
     void load();
   }
 
+  function testQr(card: Card) {
+    setMessage(`اختبار QR: البطاقة النشطة تخص ${card.student.fullName} — ${card.student.studentCode}. جرّب مسحها من شاشة المقصف.`);
+  }
+
   return (
     <AdminShell>
       <header>
@@ -68,9 +87,17 @@ export default function Cards() {
         <button type="button" onClick={() => print()}>طباعة البطاقات</button>
       </header>
 
+      <form className="entry student-tools">
+        <label>المدرسة<select value={schoolId} onChange={event => setSchoolId(event.target.value)}><option value="">كل المدارس</option>{schools.map(school => <option key={school.id} value={school.id}>{school.name}</option>)}</select></label>
+        <label>الصف<select value={grade} onChange={event => setGrade(event.target.value)}><option value="">كل الصفوف</option>{grades.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label>حالة البطاقة<select value={status} onChange={event => setStatus(event.target.value)}><option value="">كل الحالات</option><option value="ACTIVE">النشطة فقط</option><option value="REVOKED">الملغاة</option><option value="EXPIRED">المنتهية</option></select></label>
+        <label>مقاس الطباعة<select value={printMode} onChange={event => setPrintMode(event.target.value as typeof printMode)}><option value="business">بطاقة عمل</option><option value="a4">صفحة A4</option><option value="labels">ملصقات</option></select></label>
+        <small className="form-note">البطاقات الجاهزة للطباعة: {visibleCards.length}</small>
+      </form>
+
       {message && <p role="status">{message}</p>}
 
-      <table>
+      <table className={`cards-print-table print-${printMode}`}>
         <thead>
           <tr>
             <th>الطالب</th>
@@ -82,7 +109,7 @@ export default function Cards() {
           </tr>
         </thead>
         <tbody>
-          {cards.map(card => (
+          {visibleCards.map(card => (
             <tr key={card.id}>
               <td>{card.student.fullName}<br /><small>{card.student.studentCode}</small></td>
               <td>{card.student.school.name}</td>
@@ -102,13 +129,14 @@ export default function Cards() {
               <td>{new Date(card.issuedAt).toLocaleDateString('ar-SA')}</td>
               <td>
                 {card.status === 'ACTIVE'
-                  ? <button onClick={() => void revoke(card)}>إلغاء</button>
+                  ? <><button onClick={() => testQr(card)}>اختبار QR</button><button onClick={() => void revoke(card)}>إلغاء</button></>
                   : !activeStudentIds.has(card.student.id)
                     ? <button onClick={() => void replace(card)}>إصدار بديل</button>
                     : 'تم الاستبدال'}
               </td>
             </tr>
           ))}
+          {!visibleCards.length && <tr><td colSpan={6}>لا توجد بطاقات مطابقة للفلتر.</td></tr>}
         </tbody>
       </table>
     </AdminShell>

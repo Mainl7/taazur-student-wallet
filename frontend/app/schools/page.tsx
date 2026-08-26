@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import AdminShell from '../components/AdminShell';
 import { apiFetch } from '../lib/api';
 
@@ -9,7 +9,12 @@ type School = { id: string; schoolCode: string; name: string; city: string; dist
 export default function Schools() {
   const [schools, setSchools] = useState<School[]>([]);
   const [editing, setEditing] = useState<School | null>(null);
+  const [searchText, setSearchText] = useState('');
   const [message, setMessage] = useState('');
+  const visibleSchools = useMemo(() => {
+    const query = searchText.trim().toLocaleLowerCase('ar-SA');
+    return schools.filter(school => !query || [school.name, school.schoolCode, school.city, school.district ?? ''].some(value => value.toLocaleLowerCase('ar-SA').includes(query)));
+  }, [schools, searchText]);
 
   const load = async () => {
     const response = await apiFetch('/schools');
@@ -103,9 +108,17 @@ export default function Schools() {
         </form>
       )}
       {message && <p role="status">{message}</p>}
+      <form className="entry student-tools">
+        <label>
+          بحث المدارس
+          <input value={searchText} onChange={event => setSearchText(event.target.value)} placeholder="ابحث بالاسم أو الرمز أو المدينة..." />
+        </label>
+        <button type="button" className="secondary" onClick={() => setSearchText('')}>مسح البحث</button>
+        <small className="form-note">النتائج: {visibleSchools.length} من {schools.length}</small>
+      </form>
       <table>
         <thead><tr><th>الرمز</th><th>المدرسة</th><th>المدينة</th><th>الحي</th><th>الطلاب</th><th>الحالة</th><th>الإجراءات</th></tr></thead>
-        <tbody>{schools.map(school => <tr key={school.id}><td>{school.schoolCode}</td><td>{school.name}</td><td>{school.city}</td><td>{school.district ?? '—'}</td><td>{school._count.students}</td><td>{school.status}</td><td className="row-actions"><button type="button" onClick={() => setEditing(school)}>تعديل</button><button type="button" className="danger-button" onClick={() => void deactivateSchool(school)} disabled={school.status !== 'ACTIVE'}>تعطيل</button></td></tr>)}</tbody>
+        <tbody>{visibleSchools.map(school => <tr key={school.id}><td>{school.schoolCode}</td><td>{school.name}</td><td>{school.city}</td><td>{school.district ?? '—'}</td><td>{school._count.students}</td><td>{school.status}</td><td className="row-actions"><a className="table-link" href={`/schools/${school.id}`}>تفاصيل</a><button type="button" onClick={() => setEditing(school)}>تعديل</button><button type="button" className="danger-button" onClick={() => void deactivateSchool(school)} disabled={school.status !== 'ACTIVE'}>تعطيل</button></td></tr>)}</tbody>
       </table>
     </AdminShell>
   );

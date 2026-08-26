@@ -13,6 +13,7 @@ type LookupStudent = { id: string; fullName: string; studentCode: string; grade:
 type Canteen = { id: string; name: string; canteenCode?: string | null; school: { name: string; schoolCode: string } };
 type CanteenSummary = { debit: string; refund: string; net: string; transactionCount: number; periodStart: string; canteen?: { name: string } | null };
 type DebitTransaction = { id: string; amount: string; balanceAfter: string; reference: string; student?: { fullName: string; studentCode: string }; canteen?: { name: string } | null };
+type RecentTransaction = { id: string; type: 'DEBIT' | 'REFUND'; amount: string; createdAt: string; reference: string; student?: { fullName: string; studentCode: string }; canteen?: { name: string } | null };
 
 const scannerHints = new Map<DecodeHintType, unknown>([
   [
@@ -30,7 +31,9 @@ export default function Canteen() {
   const [canteens, setCanteens] = useState<Canteen[]>([]);
   const [selectedCanteenId, setSelectedCanteenId] = useState('');
   const [summary, setSummary] = useState<CanteenSummary | null>(null);
+  const [recentTransactions, setRecentTransactions] = useState<RecentTransaction[]>([]);
   const [lastTransaction, setLastTransaction] = useState<DebitTransaction | null>(null);
+  const [processing, setProcessing] = useState(false);
   const cardInput = useRef<HTMLInputElement>(null);
   const amountInput = useRef<HTMLInputElement>(null);
   const video = useRef<HTMLVideoElement>(null);
@@ -55,7 +58,10 @@ export default function Canteen() {
   }, []);
 
   useEffect(() => {
-    if (authorized) void loadSummary();
+    if (authorized) {
+      void loadSummary();
+      void loadRecentTransactions();
+    }
   }, [authorized, selectedCanteenId]);
 
   function stopCamera() {
@@ -71,6 +77,28 @@ export default function Canteen() {
     if (!response.ok) return;
     const data: { summary?: CanteenSummary } = await response.json();
     if (data.summary) setSummary(data.summary);
+  }
+
+  async function loadRecentTransactions() {
+    const query = selectedCanteenId ? `?canteenId=${encodeURIComponent(selectedCanteenId)}` : '';
+    const response = await apiFetch(`/canteen/recent-transactions${query}`);
+    if (!response.ok) return;
+    const data: { transactions?: RecentTransaction[] } = await response.json();
+    setRecentTransactions(Array.isArray(data.transactions) ? data.transactions : []);
+  }
+
+  function beep(tone: 'success' | 'error') {
+    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const audio = new AudioContextClass();
+    const oscillator = audio.createOscillator();
+    const gain = audio.createGain();
+    oscillator.frequency.value = tone === 'success' ? 880 : 220;
+    gain.gain.value = 0.05;
+    oscillator.connect(gain);
+    gain.connect(audio.destination);
+    oscillator.start();
+    setTimeout(() => { oscillator.stop(); void audio.close(); }, 120);
   }
 
   async function loadCanteens() {
@@ -154,6 +182,8 @@ export default function Canteen() {
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (processing) return;
+    setProcessing(true);
     const form = e.currentTarget;
     const response = await apiFetch('/transactions/debit', {
       method: 'POST',
@@ -163,14 +193,21 @@ export default function Canteen() {
     const data: { transaction?: DebitTransaction; error?: string } = await response.json();
 
     if (response.status === 401) return location.assign('/login');
-    if (!response.ok) return setNotice({ tone: 'error', text: `رُفضت العملية: ${data.error ?? 'UNKNOWN_ERROR'}` });
+    if (!response.ok) {
+      beep('error');
+      setProcessing(false);
+      return setNotice({ tone: 'error', text: `رُفضت العملية: ${data.error ?? 'UNKNOWN_ERROR'}` });
+    }
 
     setLastTransaction(data.transaction ?? null);
     form.reset();
     setLookup(null);
     cardInput.current?.focus();
+    beep('success');
     setNotice({ tone: 'success', text: `تم صرف مبلغ الفسحة بنجاح من ${data.transaction?.student?.fullName ?? 'الطالب'}: ${data.transaction!.amount} ر.س — رصيد الفسحة المتبقي: ${data.transaction!.balanceAfter} ر.س — رقم العملية: ${data.transaction!.reference}` });
+    setProcessing(false);
     void loadSummary();
+    void loadRecentTransactions();
   }
 
   async function refundByReference(reference: string) {
@@ -182,12 +219,17 @@ export default function Canteen() {
     const data: { transaction?: { amount: string; balanceAfter: string; reference: string }; error?: string; replayed?: boolean } = await response.json();
 
     if (response.status === 401) return location.assign('/login');
-    if (!response.ok) return setNotice({ tone: 'error', text: `رُفض الاسترجاع: ${data.error ?? 'UNKNOWN_ERROR'}` });
+    if (!response.ok) {
+      beep('error');
+      return setNotice({ tone: 'error', text: `رُفض الاسترجاع: ${data.error ?? 'UNKNOWN_ERROR'}` });
+    }
 
     cardInput.current?.focus();
     setLastTransaction(null);
+    beep('success');
     setNotice({ tone: 'success', text: `${data.replayed ? 'سبق استرجاع العملية' : 'تم الاسترجاع بنجاح'}: ${data.transaction!.amount} ر.س — رصيد الفسحة بعد الاسترجاع: ${data.transaction!.balanceAfter} ر.س` });
     void loadSummary();
+    void loadRecentTransactions();
   }
 
   async function refund(e: FormEvent<HTMLFormElement>) {
@@ -235,9 +277,19 @@ export default function Canteen() {
             <video ref={video} className="scanner-preview" muted playsInline autoPlay hidden={!scanning} />
             {lookup && <div className="student-preview"><strong>{lookup.fullName}</strong><span>{lookup.schoolName} — {lookup.studentCode}</span><span>رصيد الفسحة: {lookup.balance} ر.س — المتبقي من الحد اليومي: {lookup.todayRemaining} ر.س</span></div>}
             <label>قيمة العملية (ر.س)<input ref={amountInput} name="amount" required type="number" min="0.01" step="0.01" /></label>
-            <button>تأكيد صرف الفسحة</button>
+            <button disabled={processing}>{processing ? 'جاري تنفيذ العملية...' : 'تأكيد صرف الفسحة'}</button>
             {lastTransaction && <button type="button" className="danger-button" onClick={() => void refundByReference(lastTransaction.reference)}>استرجاع آخر عملية: {lastTransaction.amount} ر.س</button>}
           </form>
+          <section className="pos-recent">
+            <h2>آخر 10 عمليات</h2>
+            <table>
+              <thead><tr><th>الوقت</th><th>الطالب</th><th>النوع</th><th>المبلغ</th><th>المرجع</th></tr></thead>
+              <tbody>
+                {recentTransactions.map(transaction => <tr key={transaction.id}><td>{new Date(transaction.createdAt).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}</td><td>{transaction.student ? `${transaction.student.fullName} — ${transaction.student.studentCode}` : '—'}</td><td>{transaction.type === 'DEBIT' ? 'صرف' : 'استرجاع'}</td><td>{transaction.amount} ر.س</td><td className="token">{transaction.reference}</td></tr>)}
+                {!recentTransactions.length && <tr><td colSpan={5}>لا توجد عمليات حديثة.</td></tr>}
+              </tbody>
+            </table>
+          </section>
           <form onSubmit={refund}>
             <h2>استرجاع عملية برقمها</h2>
             <label>رقم العملية<input name="reference" required placeholder="الصق رقم العملية هنا" /></label>
