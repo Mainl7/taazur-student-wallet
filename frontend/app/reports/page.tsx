@@ -14,6 +14,7 @@ type Report = { spendingBySchool: Spending[]; topStudents: TopItem[]; topSchools
 type School = { id: string; name: string; schoolCode: string };
 
 const currentMonth = new Date().toISOString().slice(0, 7);
+const exportUrl = (path: string, query: string) => `/api/v1/exports/${path}?${query}`;
 
 export default function ReportsPage() {
   const [month, setMonth] = useState(currentMonth);
@@ -50,8 +51,8 @@ export default function ReportsPage() {
           <label>الشهر<input type="month" value={month} onChange={event => setMonth(event.target.value)} /></label>
           <label>المدرسة<select value={schoolId} onChange={event => setSchoolId(event.target.value)}><option value="">كل المدارس</option>{schools.map(school => <option key={school.id} value={school.id}>{school.name} — {school.schoolCode}</option>)}</select></label>
           <button onClick={() => void load()}>تحديث التقرير</button>
-          <a href={`/exports/monthly-expenses.xls?${query}`}>Excel</a>
-          <a href={`/exports/monthly-expenses-print?${query}`} target="_blank">PDF</a>
+          <a href={exportUrl('monthly-expenses.xls', query)}>Excel</a>
+          <a href={exportUrl('monthly-expenses-print', query)} target="_blank" rel="noreferrer">PDF</a>
         </div>
       </header>
       {message && <p role="status">{message}</p>}
