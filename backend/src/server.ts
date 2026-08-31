@@ -49,7 +49,17 @@ type AuditInput = {
   newValue?: Prisma.InputJsonValue;
 };
 
-declare global { namespace Express { interface Request { claims?: Claims } } }
+type SystemSettings = {
+  organizationName: string;
+  lowBalanceThreshold: number;
+  alertsEnabled: boolean;
+  backupReminderEnabled: boolean;
+  supportEmail: string;
+  supportPhone: string;
+  cashierRequireStudentPreview: boolean;
+};
+
+declare global { namespace Express { interface Request { claims?: Claims; requestId?: string } } }
 
 const cleanJson = (value: unknown) => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 const scopedSchool = (claims: Claims, schoolId: string) => !claims.schoolId || claims.schoolId === schoolId;
@@ -126,6 +136,40 @@ const transactionTypeLabel = (type: TransactionType | string) => ({
   REVERSAL: 'عكس',
   ADJUSTMENT: 'تعديل'
 }[type] ?? type);
+const defaultSystemSettings: SystemSettings = {
+  organizationName: 'جمعية تآزر لرعاية الأيتام بمحافظة الدرب',
+  lowBalanceThreshold: 10,
+  alertsEnabled: true,
+  backupReminderEnabled: true,
+  supportEmail: '',
+  supportPhone: '',
+  cashierRequireStudentPreview: true
+};
+
+const settingValue = <K extends keyof SystemSettings>(settings: Partial<SystemSettings>, key: K) => {
+  const value = settings[key];
+  return value === undefined || value === null ? defaultSystemSettings[key] : value;
+};
+
+async function getSystemSettings(client: PrismaClient | Prisma.TransactionClient = prisma): Promise<SystemSettings> {
+  const rows = await client.systemSetting.findMany({ where: { key: { in: Object.keys(defaultSystemSettings) } } });
+  const values = Object.fromEntries(rows.map(row => [row.key, row.value])) as Partial<SystemSettings>;
+  return {
+    organizationName: String(settingValue(values, 'organizationName')),
+    lowBalanceThreshold: Math.max(0, Number(settingValue(values, 'lowBalanceThreshold')) || defaultSystemSettings.lowBalanceThreshold),
+    alertsEnabled: Boolean(settingValue(values, 'alertsEnabled')),
+    backupReminderEnabled: Boolean(settingValue(values, 'backupReminderEnabled')),
+    supportEmail: String(settingValue(values, 'supportEmail')),
+    supportPhone: String(settingValue(values, 'supportPhone')),
+    cashierRequireStudentPreview: Boolean(settingValue(values, 'cashierRequireStudentPreview'))
+  };
+}
+
+app.use((req, res, next) => {
+  req.requestId = req.header('x-request-id')?.slice(0, 64) || randomUUID();
+  res.setHeader('x-request-id', req.requestId);
+  next();
+});
 
 function scopedSchoolFromQuery(req: Request) {
   const requested = typeof req.query.schoolId === 'string' && req.query.schoolId ? req.query.schoolId : undefined;
@@ -883,6 +927,7 @@ app.get('/api/v1/transactions', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_A
 });
 app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
   try {
+    const settings = await getSystemSettings();
     const schoolId = scopedSchoolFromQuery(req);
     const studentWhere = schoolId ? { schoolId } : {};
     const walletWhere = schoolId ? { student: { schoolId } } : {};
@@ -934,8 +979,8 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
       prisma.walletTransaction.aggregate({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: month } }, _sum: { amount: true } }),
       prisma.walletTransaction.aggregate({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: periodDateFilter }, _sum: { amount: true } }),
       prisma.card.count({ where: { status: 'REVOKED', ...(schoolId ? { student: { schoolId } } : {}) } }),
-      prisma.wallet.findMany({ where: { balance: { lt: 10 }, student: { ...studentWhere, status: EntityStatus.ACTIVE } }, include: { student: { select: { id: true, fullName: true, studentCode: true, school: { select: { name: true } } } } }, take: 5, orderBy: { balance: 'asc' } }),
-      prisma.wallet.count({ where: { balance: { lt: 10 }, student: { ...studentWhere, status: EntityStatus.ACTIVE } } }),
+      prisma.wallet.findMany({ where: { balance: { lt: settings.lowBalanceThreshold }, student: { ...studentWhere, status: EntityStatus.ACTIVE } }, include: { student: { select: { id: true, fullName: true, studentCode: true, school: { select: { name: true } } } } }, take: 5, orderBy: { balance: 'asc' } }),
+      prisma.wallet.count({ where: { balance: { lt: settings.lowBalanceThreshold }, student: { ...studentWhere, status: EntityStatus.ACTIVE } } }),
       prisma.student.findMany({ where: { ...studentWhere, status: EntityStatus.ACTIVE }, select: { id: true, fullName: true, studentCode: true, dailyLimit: true, school: { select: { name: true } } } }),
       prisma.walletTransaction.findMany({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: today } }, select: { studentId: true, amount: true } }),
       prisma.walletTransaction.findMany({ where: { ...transactionWhere, type: TransactionType.REFUND, createdAt: { gte: today } }, select: { studentId: true, amount: true, reference: true } }),
@@ -959,8 +1004,8 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
     }
     const dailyLimitReached = [...dailyLimitMap.values()].filter(item => Math.max(0, item.debit - item.refund) >= money(item.student.dailyLimit));
     const repeatedRefunds = refundGroups.filter(group => group._count.id >= 3).length;
-    const alertsCount = lowWalletCount + dailyLimitReached.length + revokedAttempts + failedLogins + repeatedRefunds;
-    const actionItems = [
+    const rawAlertsCount = lowWalletCount + dailyLimitReached.length + revokedAttempts + failedLogins + repeatedRefunds;
+    const actionItems = settings.alertsEnabled ? [
       ...lowWallets.map(wallet => ({
         id: `LOW_BALANCE_${wallet.student.id}`,
         type: 'LOW_BALANCE',
@@ -1006,7 +1051,7 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
         metric: repeatedRefunds,
         href: '/alerts'
       }] : [])
-    ].sort((a, b) => alertPriority[b.severity] - alertPriority[a.severity]);
+    ].sort((a, b) => alertPriority[b.severity] - alertPriority[a.severity]) : [];
 
     const spendingByDay = last7Days.map(date => ({ date, amount: 0, count: 0 }));
     const dayMap = new Map(spendingByDay.map(item => [item.date, item]));
@@ -1042,7 +1087,7 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
       monthSpent: asMoney(monthSpent._sum.amount),
       periodSpent: asMoney(periodSpent._sum.amount),
       revokedCards,
-      alertsCount,
+      alertsCount: settings.alertsEnabled ? rawAlertsCount : 0,
       filter: {
         period,
         schoolId: schoolId ?? null,
@@ -1066,7 +1111,12 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
         revokedAttempts,
         actionItems
       },
-      canteen: { unsettledTotal: asMoney(canteenUnsettledTotal), canteensWithDue }
+      canteen: { unsettledTotal: asMoney(canteenUnsettledTotal), canteensWithDue },
+      settings: {
+        organizationName: settings.organizationName,
+        lowBalanceThreshold: asMoney(settings.lowBalanceThreshold),
+        alertsEnabled: settings.alertsEnabled
+      }
     });
   } catch (error) { next(error); }
 });
@@ -1227,12 +1277,13 @@ app.get('/api/v1/reports/summary', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATIO
 
 app.get('/api/v1/alerts', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
   try {
+    const settings = await getSystemSettings();
     const schoolId = scopedSchoolFromQuery(req);
     const schoolWhere = schoolId ? { schoolId } : {};
     const today = startOfToday();
     const recent = daysAgo(7);
     const [lowWallets, students, todayDebits, todayRefunds, revokedAttempts, loginAttempts, refundGroups] = await Promise.all([
-      prisma.wallet.findMany({ where: { balance: { lt: 10 }, student: schoolWhere }, include: { student: { select: { id: true, fullName: true, studentCode: true, dailyLimit: true, school: { select: { name: true } } } } }, take: 100, orderBy: { balance: 'asc' } }),
+      prisma.wallet.findMany({ where: { balance: { lt: settings.lowBalanceThreshold }, student: schoolWhere }, include: { student: { select: { id: true, fullName: true, studentCode: true, dailyLimit: true, school: { select: { name: true } } } } }, take: 100, orderBy: { balance: 'asc' } }),
       prisma.student.findMany({ where: { ...schoolWhere, status: EntityStatus.ACTIVE }, select: { id: true, fullName: true, studentCode: true, dailyLimit: true, school: { select: { name: true } } } }),
       prisma.walletTransaction.findMany({ where: { ...(schoolId ? { schoolId } : {}), type: TransactionType.DEBIT, createdAt: { gte: today } }, select: { id: true, studentId: true, amount: true } }),
       prisma.walletTransaction.findMany({ where: { ...(schoolId ? { schoolId } : {}), type: TransactionType.REFUND, createdAt: { gte: today } }, select: { reference: true, studentId: true, amount: true } }),
@@ -1295,7 +1346,7 @@ app.get('/api/v1/alerts', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, 
         id: `LOW_BALANCE_${item.studentId}`,
         type: 'LOW_BALANCE',
         severity: 'warn' as const,
-        title: 'رصيد فسحة أقل من 10 ريال',
+        title: `رصيد فسحة أقل من ${asMoney(settings.lowBalanceThreshold)} ريال`,
         description: `${item.studentName} — ${item.schoolName} — رصيد الفسحة ${item.balance} ر.س`,
         metric: `${item.balance} ر.س`,
         href: `/students/${item.studentId}`,
@@ -1322,24 +1373,29 @@ app.get('/api/v1/alerts', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, 
         createdAt: recent
       }))
     ].sort((a, b) => alertPriority[b.severity] - alertPriority[a.severity] || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const visibleItems = settings.alertsEnabled ? items : [];
 
     res.json({
       summary: {
-        total: items.length,
-        danger: items.filter(item => item.severity === 'danger').length,
-        warn: items.filter(item => item.severity === 'warn').length,
-        lowBalances: lowBalances.length,
-        dailyLimitReached: dailyLimitReached.length,
-        revokedCardAttempts: revokedCardAttempts.length,
-        failedLogins: failedLoginAlerts.length,
-        repeatedRefunds: repeatedRefunds.length
+        total: visibleItems.length,
+        danger: visibleItems.filter(item => item.severity === 'danger').length,
+        warn: visibleItems.filter(item => item.severity === 'warn').length,
+        lowBalances: settings.alertsEnabled ? lowBalances.length : 0,
+        dailyLimitReached: settings.alertsEnabled ? dailyLimitReached.length : 0,
+        revokedCardAttempts: settings.alertsEnabled ? revokedCardAttempts.length : 0,
+        failedLogins: settings.alertsEnabled ? failedLoginAlerts.length : 0,
+        repeatedRefunds: settings.alertsEnabled ? repeatedRefunds.length : 0
       },
-      items,
-      lowBalances,
-      dailyLimitReached,
-      revokedCardAttempts,
-      failedLogins: failedLoginAlerts,
-      repeatedRefunds
+      items: visibleItems,
+      lowBalances: settings.alertsEnabled ? lowBalances : [],
+      dailyLimitReached: settings.alertsEnabled ? dailyLimitReached : [],
+      revokedCardAttempts: settings.alertsEnabled ? revokedCardAttempts : [],
+      failedLogins: settings.alertsEnabled ? failedLoginAlerts : [],
+      repeatedRefunds: settings.alertsEnabled ? repeatedRefunds : [],
+      settings: {
+        lowBalanceThreshold: asMoney(settings.lowBalanceThreshold),
+        alertsEnabled: settings.alertsEnabled
+      }
     });
   } catch (error) { next(error); }
 });
@@ -1376,7 +1432,12 @@ app.get('/api/v1/exports/monthly-expenses-print', auth, roles(Role.SUPER_ADMIN, 
   } catch (error) { next(error); }
 });
 
-const debitSchema = z.object({ cardToken: z.string().min(20).max(128), amount: z.coerce.number().positive().max(1000), canteenId: z.string().cuid().optional() });
+const debitSchema = z.object({
+  cardToken: z.string().min(20).max(128),
+  amount: z.coerce.number().positive().max(1000),
+  canteenId: z.string().cuid().optional(),
+  previewConfirmed: z.preprocess(value => value === true || value === 'true', z.boolean()).optional()
+});
 
 app.get('/api/v1/cards/lookup', auth, roles(Role.CANTEEN_CASHIER, Role.CANTEEN_OPERATOR), async (req, res, next) => {
   try {
@@ -1441,6 +1502,8 @@ app.post('/api/v1/transactions/debit', auth, roles(Role.CANTEEN_CASHIER, Role.CA
     const idempotencyKey = req.header('idempotency-key');
     if (!idempotencyKey) return res.status(400).json({ error: 'IDEMPOTENCY_KEY_REQUIRED' });
     const input = debitSchema.parse(req.body);
+    const settings = await getSystemSettings();
+    if (settings.cashierRequireStudentPreview && !input.previewConfirmed) return res.status(409).json({ error: 'STUDENT_PREVIEW_REQUIRED' });
     const existing = await prisma.walletTransaction.findUnique({ where: { idempotencyKey } });
     if (existing) return res.status(200).json({ transaction: existing, replayed: true });
     const canteen = await resolveCanteenAccess(prisma, req.claims!, input.canteenId);
@@ -1776,6 +1839,7 @@ app.get('/api/v1/system/status', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_
   try {
     await prisma.$queryRaw`SELECT 1`;
     const officialAdminEmail = process.env.OFFICIAL_ADMIN_EMAIL?.trim().toLowerCase() ?? '';
+    const settings = await getSystemSettings();
     const [
       users,
       schools,
@@ -1786,7 +1850,10 @@ app.get('/api/v1/system/status', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_
       lockedLogins,
       lockedAttempts,
       demoAccounts,
-      officialAdmin
+      officialAdmin,
+      openErrors,
+      recentErrors,
+      lastBackup
     ] = await Promise.all([
       prisma.user.count(),
       prisma.school.count({ where: req.claims!.schoolId ? { id: req.claims!.schoolId } : {} }),
@@ -1797,7 +1864,10 @@ app.get('/api/v1/system/status', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_
       prisma.loginAttempt.count({ where: { lockedUntil: { gt: new Date() } } }),
       prisma.loginAttempt.findMany({ where: { lockedUntil: { gt: new Date() } }, orderBy: { lastAttemptAt: 'desc' }, take: 25 }),
       prisma.user.findMany({ where: { email: { in: demoEmails } }, select: { id: true, email: true, role: true, status: true, createdAt: true } }),
-      officialAdminEmail ? prisma.user.findUnique({ where: { email: officialAdminEmail }, select: { id: true, email: true, role: true, status: true } }) : Promise.resolve(null)
+      officialAdminEmail ? prisma.user.findUnique({ where: { email: officialAdminEmail }, select: { id: true, email: true, role: true, status: true } }) : Promise.resolve(null),
+      prisma.errorLog.count({ where: { resolvedAt: null } }),
+      prisma.errorLog.findMany({ where: req.claims!.schoolId ? { schoolId: req.claims!.schoolId } : {}, orderBy: { createdAt: 'desc' }, take: 12 }),
+      prisma.auditLog.findFirst({ where: { action: 'SYSTEM_BACKUP_DOWNLOADED' }, orderBy: { timestamp: 'desc' }, select: { timestamp: true, user: { select: { email: true } } } })
     ]);
     res.json({
       database: { ok: true, provider: 'mysql' },
@@ -1808,17 +1878,66 @@ app.get('/api/v1/system/status', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_
         officialAdminEmailConfigured: !!officialAdminEmail,
         webOriginConfigured: !!process.env.WEB_ORIGIN
       },
-      counts: { users, schools, students, canteens, transactions, activeSessions, lockedLogins },
+      counts: { users, schools, students, canteens, transactions, activeSessions, lockedLogins, openErrors },
       lockedAttempts,
       demoAccounts,
       officialAdmin,
+      settings,
+      recentErrors,
+      lastBackup,
       recommendations: [
-        'فعّل نسخة MySQL يومية من لوحة الاستضافة.',
-        'نزّل نسخة JSON قبل أي تعديل كبير.',
+        'فعّل نسخة MySQL يومية أو جدولة سكربت النسخ الاحتياطي.',
+        'نزّل نسخة JSON قبل أي تعديل كبير أو قبل استيراد بيانات جديدة.',
         'أبقِ COOKIE_SECURE=true في الإنتاج مع HTTPS.',
-        'تأكد أن WEB_ORIGIN يطابق رابط الموقع الرسمي فقط.'
+        'تأكد أن WEB_ORIGIN يطابق رابط الموقع الرسمي فقط.',
+        'جرّب كل تحديث في بيئة Staging قبل اعتماده في Production.'
       ]
     });
+  } catch (error) { next(error); }
+});
+
+const systemSettingsSchema = z.object({
+  organizationName: z.string().trim().min(2).max(160).optional(),
+  lowBalanceThreshold: z.coerce.number().min(0).max(500).optional(),
+  alertsEnabled: z.boolean().optional(),
+  backupReminderEnabled: z.boolean().optional(),
+  supportEmail: z.string().trim().email().or(z.literal('')).optional(),
+  supportPhone: z.string().trim().max(40).optional(),
+  cashierRequireStudentPreview: z.boolean().optional()
+});
+
+app.get('/api/v1/system/settings', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR, Role.CANTEEN_CASHIER, Role.CANTEEN_OPERATOR, Role.CANTEEN_OWNER), async (_req, res, next) => {
+  try {
+    res.json({ settings: await getSystemSettings() });
+  } catch (error) { next(error); }
+});
+
+app.patch('/api/v1/system/settings', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN), async (req, res, next) => {
+  try {
+    const input = systemSettingsSchema.parse(req.body);
+    const entries = Object.entries(input).filter(([, value]) => value !== undefined);
+    await prisma.$transaction(async tx => {
+      for (const [key, value] of entries) {
+        await tx.systemSetting.upsert({
+          where: { key },
+          create: { key, value: cleanJson(value) as Prisma.InputJsonValue, updatedById: req.claims!.sub },
+          update: { value: cleanJson(value) as Prisma.InputJsonValue, updatedById: req.claims!.sub }
+        });
+      }
+      await audit(tx, req, { action: 'SYSTEM_SETTINGS_UPDATED', entity: 'SystemSetting', entityId: 'system-settings', newValue: cleanJson(input) });
+    });
+    res.json({ settings: await getSystemSettings() });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/v1/system/error-logs/:errorLogId/resolve', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN), async (req, res, next) => {
+  try {
+    const errorLogId = routeParam(req.params.errorLogId);
+    await prisma.$transaction(async tx => {
+      const updated = await tx.errorLog.update({ where: { id: errorLogId }, data: { resolvedAt: new Date() } });
+      await audit(tx, req, { action: 'ERROR_LOG_RESOLVED', entity: 'ErrorLog', entityId: updated.id, newValue: cleanJson({ requestId: updated.requestId }) });
+    });
+    res.json({ ok: true });
   } catch (error) { next(error); }
 });
 
@@ -1897,11 +2016,27 @@ app.get('/api/v1/system/backup.json', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIA
 });
 
 app.get('/api/v1/health', (_req, res) => res.json({ status: 'ok' }));
-app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
   const prismaCode = typeof error === 'object' && error !== null && 'code' in error ? (error as { code?: string }).code : undefined;
   const message = error instanceof z.ZodError ? 'VALIDATION_ERROR' : prismaCode === 'P2002' ? 'DUPLICATE_RECORD' : error instanceof Error ? error.message : 'INTERNAL_ERROR';
-  const status = ['FORBIDDEN', 'ORIGIN_DENIED', 'OWNER_CASHIER_DENIED', 'CANTEEN_SCOPE_DENIED'].includes(message) ? 403 : message === 'LOGIN_LOCKED' ? 429 : ['INSUFFICIENT_BALANCE', 'STUDENT_INACTIVE', 'SCHOOL_SCOPE_DENIED', 'DAILY_LIMIT_EXCEEDED', 'REFUND_ONLY_DEBIT', 'CARD_REVOKED', 'CARD_NOT_ACTIVE', 'NO_UNSETTLED_AMOUNT', 'SCHOOL_HAS_ACTIVE_STUDENTS', 'SCHOOL_INACTIVE'].includes(message) ? 409 : message === 'DUPLICATE_RECORD' ? 409 : message === 'CARD_NOT_FOUND' ? 404 : 400;
-  res.status(status).json({ error: message });
+  const status = ['FORBIDDEN', 'ORIGIN_DENIED', 'OWNER_CASHIER_DENIED', 'CANTEEN_SCOPE_DENIED'].includes(message) ? 403 : message === 'LOGIN_LOCKED' ? 429 : ['INSUFFICIENT_BALANCE', 'STUDENT_INACTIVE', 'SCHOOL_SCOPE_DENIED', 'DAILY_LIMIT_EXCEEDED', 'REFUND_ONLY_DEBIT', 'CARD_REVOKED', 'CARD_NOT_ACTIVE', 'NO_UNSETTLED_AMOUNT', 'SCHOOL_HAS_ACTIVE_STUDENTS', 'SCHOOL_INACTIVE', 'STUDENT_PREVIEW_REQUIRED'].includes(message) ? 409 : message === 'DUPLICATE_RECORD' ? 409 : ['CARD_NOT_FOUND', 'TRANSACTION_NOT_FOUND'].includes(message) ? 404 : message === 'VALIDATION_ERROR' ? 400 : 500;
+  if (status >= 500 || ['ORIGIN_DENIED', 'CARD_REVOKED', 'LOGIN_LOCKED'].includes(message)) {
+    prisma.errorLog.create({
+      data: {
+        requestId: req.requestId ?? randomUUID(),
+        method: req.method,
+        path: req.originalUrl.slice(0, 300),
+        statusCode: status,
+        error: message.slice(0, 120),
+        message: error instanceof Error ? error.message.slice(0, 500) : undefined,
+        userId: req.claims?.sub,
+        schoolId: req.claims?.schoolId,
+        ip: requestIp(req),
+        userAgent: requestUserAgent(req)
+      }
+    }).catch(() => undefined);
+  }
+  res.status(status).json({ error: message, requestId: req.requestId });
 });
 const port = Number(process.env.PORT ?? 4000);
 app.listen(port, '0.0.0.0', () => console.log(`API listening on :${port}`));

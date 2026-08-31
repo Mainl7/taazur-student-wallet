@@ -14,6 +14,7 @@ type Canteen = { id: string; name: string; canteenCode?: string | null; school: 
 type CanteenSummary = { debit: string; refund: string; net: string; transactionCount: number; periodStart: string; canteen?: { name: string } | null };
 type DebitTransaction = { id: string; amount: string; balanceAfter: string; reference: string; student?: { fullName: string; studentCode: string }; canteen?: { name: string } | null };
 type RecentTransaction = { id: string; type: 'DEBIT' | 'REFUND'; amount: string; createdAt: string; reference: string; student?: { fullName: string; studentCode: string }; canteen?: { name: string } | null };
+type SystemSettings = { cashierRequireStudentPreview: boolean };
 
 const scannerHints = new Map<DecodeHintType, unknown>([
   [
@@ -33,6 +34,7 @@ export default function Canteen() {
   const [summary, setSummary] = useState<CanteenSummary | null>(null);
   const [recentTransactions, setRecentTransactions] = useState<RecentTransaction[]>([]);
   const [lastTransaction, setLastTransaction] = useState<DebitTransaction | null>(null);
+  const [settings, setSettings] = useState<SystemSettings>({ cashierRequireStudentPreview: true });
   const [processing, setProcessing] = useState(false);
   const cardInput = useRef<HTMLInputElement>(null);
   const amountInput = useRef<HTMLInputElement>(null);
@@ -51,6 +53,7 @@ export default function Canteen() {
       setAuthorized(true);
       cardInput.current?.focus();
       void loadCanteens();
+      void loadSettings();
     };
 
     void checkAccess();
@@ -85,6 +88,13 @@ export default function Canteen() {
     if (!response.ok) return;
     const data: { transactions?: RecentTransaction[] } = await response.json();
     setRecentTransactions(Array.isArray(data.transactions) ? data.transactions : []);
+  }
+
+  async function loadSettings() {
+    const response = await apiFetch('/system/settings');
+    if (!response.ok) return;
+    const data: { settings?: SystemSettings } = await response.json();
+    if (data.settings) setSettings(data.settings);
   }
 
   function beep(tone: 'success' | 'error') {
@@ -185,10 +195,19 @@ export default function Canteen() {
     if (processing) return;
     setProcessing(true);
     const form = e.currentTarget;
+    const amount = Number(new FormData(form).get('amount') ?? 0);
+    if (settings.cashierRequireStudentPreview && !lookup) {
+      setProcessing(false);
+      return setNotice({ tone: 'error', text: 'قبل الخصم اضغط “إظهار الطالب” أو امسح QR حتى يظهر اسم الطالب بوضوح.' });
+    }
+    if (lookup && !confirm(`تأكيد صرف الفسحة\n\nالطالب: ${lookup.fullName}\nالمدرسة: ${lookup.schoolName}\nالمبلغ: ${amount.toFixed(2)} ر.س`)) {
+      setProcessing(false);
+      return;
+    }
     const response = await apiFetch('/transactions/debit', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
-      body: JSON.stringify(Object.fromEntries(new FormData(form)))
+      body: JSON.stringify({ ...Object.fromEntries(new FormData(form)), previewConfirmed: !!lookup })
     });
     const data: { transaction?: DebitTransaction; error?: string } = await response.json();
 
@@ -268,6 +287,7 @@ export default function Canteen() {
               </label>
             )}
             {selectedCanteenId && <input type="hidden" name="canteenId" value={selectedCanteenId} />}
+            {lookup && <input type="hidden" name="previewConfirmed" value="true" />}
             <label>رمز البطاقة<input ref={cardInput} name="cardToken" required minLength={20} placeholder="امسح QR أو الباركود هنا" autoComplete="off" onBlur={() => void lookupCard()} /></label>
             <div className="scan-actions">
               <button type="button" className="secondary" onClick={() => void lookupCard()}>إظهار الطالب</button>

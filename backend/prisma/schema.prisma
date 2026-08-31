@@ -206,3 +206,32 @@ model LoginAttempt {
   lastAttemptAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+model SystemSetting {
+  id String @id @default(cuid())
+  key String @unique @db.VarChar(80)
+  value Json
+  updatedById String?
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+  @@index([updatedAt])
+}
+
+model ErrorLog {
+  id String @id @default(cuid())
+  requestId String @unique @db.VarChar(64)
+  method String @db.VarChar(12)
+  path String @db.VarChar(300)
+  statusCode Int
+  error String @db.VarChar(120)
+  message String? @db.VarChar(500)
+  userId String?
+  schoolId String?
+  ip String?
+  userAgent String? @db.VarChar(500)
+  createdAt DateTime @default(now())
+  resolvedAt DateTime?
+  @@index([createdAt])
+  @@index([statusCode, createdAt])
+  @@index([schoolId, createdAt])
+}
