@@ -58,7 +58,7 @@ async function createBackup() {
       systemSettings: await prisma.systemSetting.findMany({ orderBy: { key: 'asc' } })
     }
   };
-  const backupDir = join(process.cwd(), '..', 'outputs', 'backups');
+  const backupDir = process.env.BACKUP_DIR?.trim() || join(process.cwd(), '..', 'outputs', 'backups');
   await mkdir(backupDir, { recursive: true });
   const fileName = `taazur-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
   const backupPath = join(backupDir, fileName);
