@@ -14,7 +14,7 @@ type Canteen = { id: string; name: string; canteenCode?: string | null; school: 
 type CanteenSummary = { debit: string; refund: string; net: string; transactionCount: number; periodStart: string; canteen?: { name: string } | null };
 type DebitTransaction = { id: string; amount: string; balanceAfter: string; reference: string; student?: { fullName: string; studentCode: string }; canteen?: { name: string } | null };
 type RecentTransaction = { id: string; type: 'DEBIT' | 'REFUND'; amount: string; createdAt: string; reference: string; student?: { fullName: string; studentCode: string }; canteen?: { name: string } | null };
-type SystemSettings = { cashierRequireStudentPreview: boolean };
+type SystemSettings = { cashierRequireStudentPreview: boolean; cashierSoundEnabled: boolean };
 
 const scannerHints = new Map<DecodeHintType, unknown>([
   [
@@ -34,7 +34,7 @@ export default function Canteen() {
   const [summary, setSummary] = useState<CanteenSummary | null>(null);
   const [recentTransactions, setRecentTransactions] = useState<RecentTransaction[]>([]);
   const [lastTransaction, setLastTransaction] = useState<DebitTransaction | null>(null);
-  const [settings, setSettings] = useState<SystemSettings>({ cashierRequireStudentPreview: true });
+  const [settings, setSettings] = useState<SystemSettings>({ cashierRequireStudentPreview: true, cashierSoundEnabled: true });
   const [processing, setProcessing] = useState(false);
   const cardInput = useRef<HTMLInputElement>(null);
   const amountInput = useRef<HTMLInputElement>(null);
@@ -98,6 +98,7 @@ export default function Canteen() {
   }
 
   function beep(tone: 'success' | 'error') {
+    if (!settings.cashierSoundEnabled) return;
     const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass) return;
     const audio = new AudioContextClass();

@@ -6,6 +6,10 @@ import { apiFetch } from '../lib/api';
 
 type SystemStatus = {
   database: { ok: boolean; provider: string };
+  services: {
+    frontend: { ok: boolean; label: string; url?: string | null };
+    backend: { ok: boolean; label: string; checkedAt: string };
+  };
   environment: {
     nodeEnv: string;
     cookieSecure: boolean;
@@ -22,6 +26,7 @@ type SystemStatus = {
     activeSessions: number;
     lockedLogins: number;
     openErrors: number;
+    errorsToday: number;
   };
   lockedAttempts: { email: string; failedCount: number; lockedUntil: string | null; lastAttemptAt: string }[];
   demoAccounts: { id: string; email: string; role: string; status: string; createdAt: string }[];
@@ -34,9 +39,14 @@ type SystemStatus = {
     supportEmail: string;
     supportPhone: string;
     cashierRequireStudentPreview: boolean;
+    cashierSoundEnabled: boolean;
+    sessionDurationHours: number;
+    reportsDefaultMonth: 'current' | 'previous';
   };
   recentErrors: { id: string; requestId: string; method: string; path: string; statusCode: number; error: string; message?: string | null; createdAt: string; resolvedAt?: string | null }[];
-  lastBackup: { timestamp: string; user?: { email: string } | null } | null;
+  lastBackup: { timestamp: string; user?: { email: string } | null; summary?: unknown } | null;
+  backupAlert: { id: string; severity: 'danger' | 'warn' | 'info'; title: string; description: string; href: string } | null;
+  lastPurchase: { createdAt: string; amount: string; reference: string; school?: { name: string } | null } | null;
   recommendations: string[];
 };
 
@@ -93,6 +103,15 @@ export default function SystemHealth() {
     void load();
   }
 
+  async function createBackupNow() {
+    const response = await apiFetch('/system/backup-now', { method: 'POST' });
+    const data: { exportedAt?: string; summary?: { students?: number; schools?: number; transactions?: number }; error?: string } = await response.json().catch(() => ({}));
+    if (!response.ok) return setMessage(data.error === 'FORBIDDEN' ? 'إنشاء النسخ الاحتياطية للمدير فقط.' : 'تعذر إنشاء النسخة الاحتياطية.');
+    setMessage(`تم إنشاء نسخة احتياطية الآن: ${data.summary?.students ?? 0} طالب، ${data.summary?.schools ?? 0} مدرسة، ${data.summary?.transactions ?? 0} عملية.`);
+    window.open('/api/v1/system/backup.json', '_blank');
+    void load();
+  }
+
   async function resolveError(errorLogId: string) {
     const response = await apiFetch(`/system/error-logs/${errorLogId}/resolve`, { method: 'POST' });
     if (!response.ok) return setMessage('تعذر تعليم الخطأ كمراجع.');
@@ -116,10 +135,14 @@ export default function SystemHealth() {
         <>
           <section className="cards">
             <article><small>قاعدة البيانات</small><b>{status.database.ok ? 'متصلة' : 'غير متصلة'}</b><span>{status.database.provider}</span></article>
-            <article><small>الجلسات النشطة</small><b>{status.counts.activeSessions}</b><span>جلسة</span></article>
-            <article><small>محاولات دخول مقفلة</small><b>{status.counts.lockedLogins}</b><span>حساب</span></article>
+            <article><small>حالة الواجهة</small><b>{status.services.frontend.label}</b><span>{status.services.frontend.url ?? 'الرابط الحالي'}</span></article>
+            <article><small>حالة الباكند</small><b>{status.services.backend.label}</b><span>{new Date(status.services.backend.checkedAt).toLocaleTimeString('ar-SA')}</span></article>
+            <article><small>آخر عملية شراء</small><b>{status.lastPurchase ? `${status.lastPurchase.amount} ر.س` : 'لا يوجد'}</b><span>{status.lastPurchase ? new Date(status.lastPurchase.createdAt).toLocaleString('ar-SA') : '—'}</span></article>
+            <article><small>أخطاء اليوم</small><b>{status.counts.errorsToday}</b><span>خطأ مسجل</span></article>
             <article><small>أخطاء تحتاج مراجعة</small><b>{status.counts.openErrors}</b><span>خطأ</span></article>
           </section>
+
+          {status.backupAlert && <section className="notice error backup-alert"><strong>{status.backupAlert.title}</strong><span>{status.backupAlert.description}</span></section>}
 
           <section className="panel system-checks">
             <h2>جاهزية الإنتاج</h2>
@@ -149,9 +172,19 @@ export default function SystemHealth() {
                 <label>جوال الدعم
                   <input value={settingsDraft.supportPhone} onChange={event => setSettingsDraft({ ...settingsDraft, supportPhone: event.target.value })} />
                 </label>
+                <label>مدة الجلسة بالساعات
+                  <input type="number" min="1" max="72" value={settingsDraft.sessionDurationHours} onChange={event => setSettingsDraft({ ...settingsDraft, sessionDurationHours: Number(event.target.value) })} />
+                </label>
+                <label>شهر التقارير الافتراضي
+                  <select value={settingsDraft.reportsDefaultMonth} onChange={event => setSettingsDraft({ ...settingsDraft, reportsDefaultMonth: event.target.value as 'current' | 'previous' })}>
+                    <option value="current">الشهر الحالي</option>
+                    <option value="previous">الشهر السابق</option>
+                  </select>
+                </label>
                 <label className="check-control"><input type="checkbox" checked={settingsDraft.alertsEnabled} onChange={event => setSettingsDraft({ ...settingsDraft, alertsEnabled: event.target.checked })} /> تشغيل التنبيهات الذكية</label>
                 <label className="check-control"><input type="checkbox" checked={settingsDraft.backupReminderEnabled} onChange={event => setSettingsDraft({ ...settingsDraft, backupReminderEnabled: event.target.checked })} /> تذكير النسخ الاحتياطي</label>
                 <label className="check-control"><input type="checkbox" checked={settingsDraft.cashierRequireStudentPreview} onChange={event => setSettingsDraft({ ...settingsDraft, cashierRequireStudentPreview: event.target.checked })} /> إلزام الكاشير بإظهار الطالب قبل الخصم</label>
+                <label className="check-control"><input type="checkbox" checked={settingsDraft.cashierSoundEnabled} onChange={event => setSettingsDraft({ ...settingsDraft, cashierSoundEnabled: event.target.checked })} /> تفعيل صوت النجاح والرفض في المقصف</label>
               </div>
               <button type="button" onClick={() => void saveSettings()}>حفظ إعدادات النظام</button>
             </section>
@@ -160,8 +193,11 @@ export default function SystemHealth() {
           <section className="two-columns">
             <article className="panel">
               <h2>النسخ الاحتياطي</h2>
-              <p>نزّل نسخة JSON للمراجعة قبل أي تعديل كبير. آخر نسخة من داخل النظام: {status.lastBackup ? `${new Date(status.lastBackup.timestamp).toLocaleString('ar-SA')} بواسطة ${status.lastBackup.user?.email ?? 'مستخدم'}` : 'لا توجد نسخة مسجلة بعد'}.</p>
-              <a className="button-link" href="/api/v1/system/backup.json">تنزيل نسخة JSON</a>
+              <p>أنشئ نسخة JSON للمراجعة قبل أي تعديل كبير. آخر نسخة من داخل النظام: {status.lastBackup ? `${new Date(status.lastBackup.timestamp).toLocaleString('ar-SA')} بواسطة ${status.lastBackup.user?.email ?? 'مستخدم'}` : 'لا توجد نسخة مسجلة بعد'}.</p>
+              <div className="inline-actions">
+                <button type="button" onClick={() => void createBackupNow()}>إنشاء نسخة احتياطية الآن</button>
+                <a className="button-link secondary-link" href="/api/v1/system/backup.json">تنزيل نسخة JSON</a>
+              </div>
             </article>
 
             <article className="panel">

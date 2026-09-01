@@ -57,6 +57,9 @@ type SystemSettings = {
   supportEmail: string;
   supportPhone: string;
   cashierRequireStudentPreview: boolean;
+  cashierSoundEnabled: boolean;
+  sessionDurationHours: number;
+  reportsDefaultMonth: string;
 };
 
 declare global { namespace Express { interface Request { claims?: Claims; requestId?: string } } }
@@ -136,6 +139,7 @@ const transactionTypeLabel = (type: TransactionType | string) => ({
   REVERSAL: 'عكس',
   ADJUSTMENT: 'تعديل'
 }[type] ?? type);
+const envSessionDurationHours = Number(process.env.SESSION_DURATION_HOURS ?? 8);
 const defaultSystemSettings: SystemSettings = {
   organizationName: 'جمعية تآزر لرعاية الأيتام بمحافظة الدرب',
   lowBalanceThreshold: 10,
@@ -143,7 +147,10 @@ const defaultSystemSettings: SystemSettings = {
   backupReminderEnabled: true,
   supportEmail: '',
   supportPhone: '',
-  cashierRequireStudentPreview: true
+  cashierRequireStudentPreview: true,
+  cashierSoundEnabled: true,
+  sessionDurationHours: Number.isFinite(envSessionDurationHours) ? Math.min(72, Math.max(1, envSessionDurationHours)) : 8,
+  reportsDefaultMonth: 'current'
 };
 
 const settingValue = <K extends keyof SystemSettings>(settings: Partial<SystemSettings>, key: K) => {
@@ -161,7 +168,10 @@ async function getSystemSettings(client: PrismaClient | Prisma.TransactionClient
     backupReminderEnabled: Boolean(settingValue(values, 'backupReminderEnabled')),
     supportEmail: String(settingValue(values, 'supportEmail')),
     supportPhone: String(settingValue(values, 'supportPhone')),
-    cashierRequireStudentPreview: Boolean(settingValue(values, 'cashierRequireStudentPreview'))
+    cashierRequireStudentPreview: Boolean(settingValue(values, 'cashierRequireStudentPreview')),
+    cashierSoundEnabled: Boolean(settingValue(values, 'cashierSoundEnabled')),
+    sessionDurationHours: Math.min(72, Math.max(1, Number(settingValue(values, 'sessionDurationHours')) || defaultSystemSettings.sessionDurationHours)),
+    reportsDefaultMonth: ['current', 'previous'].includes(String(settingValue(values, 'reportsDefaultMonth'))) ? String(settingValue(values, 'reportsDefaultMonth')) : defaultSystemSettings.reportsDefaultMonth
   };
 }
 
@@ -305,21 +315,23 @@ app.post('/api/v1/auth/login', async (req, res, next) => {
     }
 
     await prisma.loginAttempt.deleteMany({ where: { email } });
+    const loginSettings = await getSystemSettings();
+    const loginSessionDurationMs = loginSettings.sessionDurationHours * 60 * 60 * 1000;
     const session = await prisma.userSession.create({
       data: {
         userId: user.id,
         ip: requestIp(req),
         userAgent: requestUserAgent(req),
-        expiresAt: new Date(Date.now() + sessionDurationMs)
+        expiresAt: new Date(Date.now() + loginSessionDurationMs)
       }
     });
-    const token = jwt.sign({ sub: user.id, role: user.role, schoolId: user.schoolId ?? undefined, sid: session.id }, process.env.JWT_SECRET!, { expiresIn: Math.floor(sessionDurationMs / 1000) });
+    const token = jwt.sign({ sub: user.id, role: user.role, schoolId: user.schoolId ?? undefined, sid: session.id }, process.env.JWT_SECRET!, { expiresIn: Math.floor(loginSessionDurationMs / 1000) });
     res.cookie(cookieName, token, {
       httpOnly: true,
       secure: cookieSecure,
       sameSite: cookieSecure ? 'none' : 'lax',
       path: '/',
-      maxAge: sessionDurationMs
+      maxAge: loginSessionDurationMs
     });
     await prisma.auditLog.create({
       data: {
@@ -967,7 +979,8 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
       last7Transactions,
       topStudentGroups,
       topSchoolGroups,
-      dashboardCanteens
+      dashboardCanteens,
+      lastBackup
     ] = await Promise.all([
       prisma.school.count({ where: schoolId ? { id: schoolId } : {} }),
       prisma.student.count({ where: { ...studentWhere, status: EntityStatus.ACTIVE } }),
@@ -990,7 +1003,8 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
       prisma.walletTransaction.findMany({ where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: { gte: last7Start } }, select: { amount: true, createdAt: true } }),
       prisma.walletTransaction.groupBy({ by: ['studentId'], where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: periodDateFilter }, _sum: { amount: true }, _count: { id: true }, orderBy: { _count: { id: 'desc' } }, take: 5 }),
       prisma.walletTransaction.groupBy({ by: ['schoolId'], where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: periodDateFilter }, _sum: { amount: true }, _count: { id: true }, orderBy: { _count: { id: 'desc' } }, take: 5 }),
-      prisma.canteen.findMany({ where: { status: EntityStatus.ACTIVE, ...(schoolId ? { schoolId } : {}) }, select: { id: true } })
+      prisma.canteen.findMany({ where: { status: EntityStatus.ACTIVE, ...(schoolId ? { schoolId } : {}) }, select: { id: true } }),
+      prisma.auditLog.findFirst({ where: { action: 'SYSTEM_BACKUP_CREATED' }, orderBy: { timestamp: 'desc' }, select: { timestamp: true } })
     ]);
 
     const dailyLimitMap = new Map(activeStudentRows.map(student => [student.id, { student, debit: 0, refund: 0 }]));
@@ -1004,7 +1018,9 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
     }
     const dailyLimitReached = [...dailyLimitMap.values()].filter(item => Math.max(0, item.debit - item.refund) >= money(item.student.dailyLimit));
     const repeatedRefunds = refundGroups.filter(group => group._count.id >= 3).length;
-    const rawAlertsCount = lowWalletCount + dailyLimitReached.length + revokedAttempts + failedLogins + repeatedRefunds;
+    const backupAgeHours = lastBackup ? (Date.now() - lastBackup.timestamp.getTime()) / 60 / 60 / 1000 : null;
+    const backupAlert = settings.backupReminderEnabled && (!lastBackup || (backupAgeHours ?? 0) > 26);
+    const rawAlertsCount = lowWalletCount + dailyLimitReached.length + revokedAttempts + failedLogins + repeatedRefunds + (backupAlert ? 1 : 0);
     const actionItems = settings.alertsEnabled ? [
       ...lowWallets.map(wallet => ({
         id: `LOW_BALANCE_${wallet.student.id}`,
@@ -1050,6 +1066,15 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
         description: `${repeatedRefunds} كاشير/مدرسة لديهم 3 استرجاعات أو أكثر خلال آخر 7 أيام`,
         metric: repeatedRefunds,
         href: '/alerts'
+      }] : []),
+      ...(backupAlert ? [{
+        id: 'BACKUP_MISSING_OR_STALE',
+        type: 'BACKUP_HEALTH',
+        severity: 'danger' as const,
+        title: 'فشل أو تأخر النسخ الاحتياطي اليومي',
+        description: lastBackup ? `آخر نسخة مسجلة قبل ${Math.floor(backupAgeHours ?? 0)} ساعة.` : 'لم يتم تسجيل نسخة احتياطية من داخل النظام حتى الآن.',
+        metric: 'نسخة',
+        href: '/system'
       }] : [])
     ].sort((a, b) => alertPriority[b.severity] - alertPriority[a.severity]) : [];
 
@@ -1853,7 +1878,9 @@ app.get('/api/v1/system/status', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_
       officialAdmin,
       openErrors,
       recentErrors,
-      lastBackup
+      lastBackup,
+      errorsToday,
+      lastPurchase
     ] = await Promise.all([
       prisma.user.count(),
       prisma.school.count({ where: req.claims!.schoolId ? { id: req.claims!.schoolId } : {} }),
@@ -1867,31 +1894,53 @@ app.get('/api/v1/system/status', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_
       officialAdminEmail ? prisma.user.findUnique({ where: { email: officialAdminEmail }, select: { id: true, email: true, role: true, status: true } }) : Promise.resolve(null),
       prisma.errorLog.count({ where: { resolvedAt: null } }),
       prisma.errorLog.findMany({ where: req.claims!.schoolId ? { schoolId: req.claims!.schoolId } : {}, orderBy: { createdAt: 'desc' }, take: 12 }),
-      prisma.auditLog.findFirst({ where: { action: 'SYSTEM_BACKUP_DOWNLOADED' }, orderBy: { timestamp: 'desc' }, select: { timestamp: true, user: { select: { email: true } } } })
+      prisma.auditLog.findFirst({ where: { action: 'SYSTEM_BACKUP_CREATED' }, orderBy: { timestamp: 'desc' }, select: { timestamp: true, newValue: true, user: { select: { email: true } } } }),
+      prisma.errorLog.count({ where: { ...(req.claims!.schoolId ? { schoolId: req.claims!.schoolId } : {}), createdAt: { gte: startOfToday() } } }),
+      prisma.walletTransaction.findFirst({
+        where: { ...(req.claims!.schoolId ? { schoolId: req.claims!.schoolId } : {}), type: TransactionType.DEBIT },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true, amount: true, reference: true, studentId: true, school: { select: { name: true } } }
+      })
     ]);
+    const backupAgeHours = lastBackup ? (Date.now() - lastBackup.timestamp.getTime()) / 60 / 60 / 1000 : null;
+    const backupAlert = settings.backupReminderEnabled && (!lastBackup || (backupAgeHours ?? 0) > 26)
+      ? {
+        id: 'BACKUP_MISSING_OR_STALE',
+        severity: 'danger',
+        title: 'فشل أو تأخر النسخ الاحتياطي اليومي',
+        description: lastBackup ? `آخر نسخة مسجلة قبل ${Math.floor(backupAgeHours ?? 0)} ساعة.` : 'لا توجد نسخة احتياطية مسجلة من داخل النظام حتى الآن.',
+        href: '/system'
+      }
+      : null;
     res.json({
       database: { ok: true, provider: 'mysql' },
+      services: {
+        backend: { ok: true, label: 'متصل', checkedAt: new Date().toISOString() },
+        frontend: { ok: true, label: process.env.WEB_ORIGIN ? 'مضبوط' : 'لم يتم ضبط WEB_ORIGIN', url: process.env.WEB_ORIGIN ?? null }
+      },
       environment: {
         nodeEnv: process.env.NODE_ENV ?? 'development',
         cookieSecure,
-        sessionDurationHours: Math.round(sessionDurationMs / 60 / 60 / 1000),
+        sessionDurationHours: settings.sessionDurationHours,
         officialAdminEmailConfigured: !!officialAdminEmail,
         webOriginConfigured: !!process.env.WEB_ORIGIN
       },
-      counts: { users, schools, students, canteens, transactions, activeSessions, lockedLogins, openErrors },
+      counts: { users, schools, students, canteens, transactions, activeSessions, lockedLogins, openErrors, errorsToday },
       lockedAttempts,
       demoAccounts,
       officialAdmin,
       settings,
       recentErrors,
-      lastBackup,
+      lastBackup: lastBackup ? { timestamp: lastBackup.timestamp, user: lastBackup.user, summary: lastBackup.newValue } : null,
+      backupAlert,
+      lastPurchase: lastPurchase ? { ...lastPurchase, amount: asMoney(lastPurchase.amount) } : null,
       recommendations: [
-        'فعّل نسخة MySQL يومية أو جدولة سكربت النسخ الاحتياطي.',
-        'نزّل نسخة JSON قبل أي تعديل كبير أو قبل استيراد بيانات جديدة.',
+        backupAlert ? 'راجع النسخ الاحتياطي الآن: لم تُسجل نسخة حديثة داخل النظام.' : 'النسخ الاحتياطي اليدوي داخل النظام مسجل حديثًا.',
+        'أنشئ نسخة JSON قبل أي تعديل كبير أو قبل استيراد بيانات جديدة.',
         'أبقِ COOKIE_SECURE=true في الإنتاج مع HTTPS.',
         'تأكد أن WEB_ORIGIN يطابق رابط الموقع الرسمي فقط.',
         'جرّب كل تحديث في بيئة Staging قبل اعتماده في Production.'
-      ]
+      ].filter(Boolean)
     });
   } catch (error) { next(error); }
 });
@@ -1903,7 +1952,10 @@ const systemSettingsSchema = z.object({
   backupReminderEnabled: z.boolean().optional(),
   supportEmail: z.string().trim().email().or(z.literal('')).optional(),
   supportPhone: z.string().trim().max(40).optional(),
-  cashierRequireStudentPreview: z.boolean().optional()
+  cashierRequireStudentPreview: z.boolean().optional(),
+  cashierSoundEnabled: z.boolean().optional(),
+  sessionDurationHours: z.coerce.number().int().min(1).max(72).optional(),
+  reportsDefaultMonth: z.enum(['current', 'previous']).optional()
 });
 
 app.get('/api/v1/system/settings', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR, Role.CANTEEN_CASHIER, Role.CANTEEN_OPERATOR, Role.CANTEEN_OWNER), async (_req, res, next) => {
@@ -1974,36 +2026,65 @@ app.post('/api/v1/system/disable-demo-accounts', auth, roles(Role.SUPER_ADMIN, R
   } catch (error) { next(error); }
 });
 
+async function buildSystemBackup() {
+  const [
+    users,
+    schools,
+    students,
+    cards,
+    wallets,
+    transactions,
+    canteens,
+    settlements,
+    auditLogs,
+    errorLogs,
+    systemSettings
+  ] = await Promise.all([
+    prisma.user.findMany({ orderBy: { createdAt: 'asc' }, select: { id: true, email: true, role: true, status: true, schoolId: true, createdAt: true, updatedAt: true } }),
+    prisma.school.findMany({ orderBy: { createdAt: 'asc' } }),
+    prisma.student.findMany({ orderBy: { createdAt: 'asc' } }),
+    prisma.card.findMany({ orderBy: { issuedAt: 'asc' } }),
+    prisma.wallet.findMany(),
+    prisma.walletTransaction.findMany({ orderBy: { createdAt: 'asc' } }),
+    prisma.canteen.findMany({ orderBy: { createdAt: 'asc' } }),
+    prisma.canteenSettlement.findMany({ orderBy: { createdAt: 'asc' } }),
+    prisma.auditLog.findMany({ orderBy: { timestamp: 'asc' }, take: 5000 }),
+    prisma.errorLog.findMany({ orderBy: { createdAt: 'asc' }, take: 5000 }),
+    prisma.systemSetting.findMany({ orderBy: { key: 'asc' } })
+  ]);
+  const summary = {
+    users: users.length,
+    schools: schools.length,
+    students: students.length,
+    cards: cards.length,
+    wallets: wallets.length,
+    transactions: transactions.length,
+    canteens: canteens.length,
+    settlements: settlements.length,
+    auditLogs: auditLogs.length,
+    errorLogs: errorLogs.length,
+    systemSettings: systemSettings.length
+  };
+  return {
+    exportedAt: new Date().toISOString(),
+    version: 1,
+    note: 'Taazur operational JSON backup. Password hashes are intentionally excluded.',
+    summary,
+    data: { users, schools, students, cards, wallets, transactions, canteens, settlements, auditLogs, errorLogs, systemSettings }
+  };
+}
+
 app.get('/api/v1/system/backup.json', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN), async (req, res, next) => {
   try {
-    const [
-      users,
-      schools,
-      students,
-      cards,
-      wallets,
-      transactions,
-      canteens,
-      settlements,
-      auditLogs
-    ] = await Promise.all([
-      prisma.user.findMany({ orderBy: { createdAt: 'asc' }, select: { id: true, email: true, role: true, status: true, schoolId: true, createdAt: true, updatedAt: true } }),
-      prisma.school.findMany({ orderBy: { createdAt: 'asc' } }),
-      prisma.student.findMany({ orderBy: { createdAt: 'asc' } }),
-      prisma.card.findMany({ orderBy: { issuedAt: 'asc' } }),
-      prisma.wallet.findMany(),
-      prisma.walletTransaction.findMany({ orderBy: { createdAt: 'asc' } }),
-      prisma.canteen.findMany({ orderBy: { createdAt: 'asc' } }),
-      prisma.canteenSettlement.findMany({ orderBy: { createdAt: 'asc' } }),
-      prisma.auditLog.findMany({ orderBy: { timestamp: 'asc' }, take: 5000 })
-    ]);
+    const backup = await buildSystemBackup();
     await prisma.auditLog.create({
       data: {
         userId: req.claims!.sub,
         schoolId: req.claims!.schoolId,
-        action: 'SYSTEM_BACKUP_DOWNLOADED',
+        action: 'SYSTEM_BACKUP_CREATED',
         entity: 'System',
         entityId: 'backup-json',
+        newValue: cleanJson({ exportedAt: backup.exportedAt, summary: backup.summary }),
         ip: requestIp(req),
         userAgent: requestUserAgent(req)
       }
@@ -2011,7 +2092,26 @@ app.get('/api/v1/system/backup.json', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIA
     res
       .header('content-type', 'application/json; charset=utf-8')
       .header('content-disposition', `attachment; filename="taazur-backup-${new Date().toISOString().slice(0, 10)}.json"`)
-      .send(JSON.stringify({ exportedAt: new Date().toISOString(), version: 1, data: { users, schools, students, cards, wallets, transactions, canteens, settlements, auditLogs } }, null, 2));
+      .send(JSON.stringify(backup, null, 2));
+  } catch (error) { next(error); }
+});
+
+app.post('/api/v1/system/backup-now', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN), async (req, res, next) => {
+  try {
+    const backup = await buildSystemBackup();
+    await prisma.auditLog.create({
+      data: {
+        userId: req.claims!.sub,
+        schoolId: req.claims!.schoolId,
+        action: 'SYSTEM_BACKUP_CREATED',
+        entity: 'System',
+        entityId: 'backup-json',
+        newValue: cleanJson({ exportedAt: backup.exportedAt, summary: backup.summary, source: 'admin-button' }),
+        ip: requestIp(req),
+        userAgent: requestUserAgent(req)
+      }
+    }).catch(() => undefined);
+    res.json({ ok: true, exportedAt: backup.exportedAt, summary: backup.summary });
   } catch (error) { next(error); }
 });
 
