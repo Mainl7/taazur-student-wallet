@@ -539,14 +539,14 @@ app.delete('/api/v1/schools/:schoolId', auth, roles(Role.SUPER_ADMIN, Role.ASSOC
   } catch (error) { next(error); }
 });
 
-const canteenUserSchema = z.object({ email: z.string().trim().email(), password: z.string().min(12).max(128), schoolId: z.string().cuid().optional() });
+const canteenUserSchema = z.object({ email: z.string().trim().email(), password: z.string().min(12).max(128), schoolId: z.string().cuid().optional(), role: z.enum(['CANTEEN_CASHIER', 'CANTEEN_OWNER', 'AUDITOR']).optional() });
 const canteenPasswordResetSchema = z.object({ password: z.string().min(12).max(128) });
 app.get('/api/v1/canteen-users', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
   try {
     const where: Prisma.UserWhereInput = {
-      role: { in: [Role.CANTEEN_OPERATOR, Role.CANTEEN_CASHIER, Role.CANTEEN_OWNER] },
+      role: { in: [Role.CANTEEN_OPERATOR, Role.CANTEEN_CASHIER, Role.CANTEEN_OWNER, Role.AUDITOR] },
       status: EntityStatus.ACTIVE,
-      ...(req.claims!.schoolId ? { OR: [{ schoolId: req.claims!.schoolId }, { operatedCanteens: { some: { schoolId: req.claims!.schoolId } } }] } : {})
+      ...(req.claims!.schoolId ? { OR: [{ schoolId: req.claims!.schoolId }, { operatedCanteens: { some: { schoolId: req.claims!.schoolId } } }, { role: Role.AUDITOR, schoolId: req.claims!.schoolId }] } : {})
     };
     const users = await prisma.user.findMany({ where, select: { id: true, email: true, role: true, schoolId: true, school: { select: { name: true, schoolCode: true } }, operatedCanteens: { where: req.claims!.schoolId ? { schoolId: req.claims!.schoolId } : {}, select: { id: true, name: true, canteenCode: true, status: true, school: { select: { name: true, schoolCode: true } } }, orderBy: { name: 'asc' } }, createdAt: true }, orderBy: { createdAt: 'desc' } });
     res.json({ users });
@@ -555,12 +555,15 @@ app.get('/api/v1/canteen-users', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_
 app.post('/api/v1/canteen-users', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN), async (req, res, next) => {
   try {
     const input = canteenUserSchema.parse(req.body);
-    const schoolId = req.claims!.schoolId ?? input.schoolId ?? null;
+    const requestedRole = input.role ? Role[input.role] : undefined;
+    const schoolId = requestedRole === Role.CANTEEN_OWNER ? null : req.claims!.schoolId ?? input.schoolId ?? null;
     if (schoolId && !scopedSchool(req.claims!, schoolId)) return res.status(403).json({ error: 'SCHOOL_SCOPE_DENIED' });
+    const role = requestedRole ?? (schoolId ? Role.CANTEEN_CASHIER : Role.CANTEEN_OWNER);
+    if (role === Role.CANTEEN_CASHIER && !schoolId) return res.status(400).json({ error: 'SCHOOL_REQUIRED' });
     const passwordHash = await argon2.hash(input.password);
     const user = await prisma.$transaction(async tx => {
-      const created = await tx.user.create({ data: { email: input.email.toLowerCase(), passwordHash, role: schoolId ? Role.CANTEEN_CASHIER : Role.CANTEEN_OWNER, schoolId }, select: { id: true, email: true, role: true, schoolId: true, school: { select: { name: true, schoolCode: true } }, createdAt: true } });
-      await audit(tx, req, { action: 'CANTEEN_USER_CREATED', entity: 'User', entityId: created.id, schoolId, newValue: { email: created.email, schoolId: created.schoolId } });
+      const created = await tx.user.create({ data: { email: input.email.toLowerCase(), passwordHash, role, schoolId }, select: { id: true, email: true, role: true, schoolId: true, school: { select: { name: true, schoolCode: true } }, createdAt: true } });
+      await audit(tx, req, { action: role === Role.AUDITOR ? 'AUDITOR_USER_CREATED' : 'CANTEEN_USER_CREATED', entity: 'User', entityId: created.id, schoolId, newValue: { email: created.email, role: created.role, schoolId: created.schoolId } });
       return created;
     });
     res.status(201).json({ user });
@@ -583,7 +586,7 @@ app.patch('/api/v1/canteen-users/:userId/password', auth, roles(Role.SUPER_ADMIN
       }
     });
 
-    if (!((user.role === Role.CANTEEN_OPERATOR || user.role === Role.CANTEEN_CASHIER || user.role === Role.CANTEEN_OWNER) && user.status === EntityStatus.ACTIVE)) return res.status(400).json({ error: 'INVALID_CANTEEN_OPERATOR' });
+    if (!((user.role === Role.CANTEEN_OPERATOR || user.role === Role.CANTEEN_CASHIER || user.role === Role.CANTEEN_OWNER || user.role === Role.AUDITOR) && user.status === EntityStatus.ACTIVE)) return res.status(400).json({ error: 'INVALID_USER' });
     const visibleSchoolIds = [user.schoolId, ...user.operatedCanteens.map(canteen => canteen.schoolId)].filter(Boolean) as string[];
     if (req.claims!.schoolId && !visibleSchoolIds.includes(req.claims!.schoolId)) return res.status(403).json({ error: 'SCHOOL_SCOPE_DENIED' });
 
@@ -830,13 +833,21 @@ app.patch('/api/v1/students/:studentId', auth, roles(Role.SUPER_ADMIN, Role.ASSO
   } catch (error) { next(error); }
 });
 
+const cardDecisionSchema = z.object({ reason: z.string().trim().min(3).max(200).optional() });
+const cardDeliverySchema = z.object({
+  printed: z.boolean().optional(),
+  delivered: z.boolean().optional(),
+  deliveredByName: z.string().trim().min(2).max(120).optional(),
+  deliveryNote: z.string().trim().max(300).optional()
+});
 app.post('/api/v1/cards/:cardId/revoke', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN), async (req, res, next) => {
   try {
+    const input = cardDecisionSchema.parse(req.body ?? {});
     const card = await prisma.card.findUniqueOrThrow({ where: { id: routeParam(req.params.cardId) }, include: { student: true } });
     if (!scopedSchool(req.claims!, card.student.schoolId)) return res.status(403).json({ error: 'SCHOOL_SCOPE_DENIED' });
     const revoked = await prisma.$transaction(async tx => {
       const updated = await tx.card.update({ where: { id: card.id }, data: { status: 'REVOKED', revokedAt: new Date() } });
-      await audit(tx, req, { action: 'CARD_REVOKED', entity: 'Card', entityId: card.id, schoolId: card.student.schoolId, oldValue: { status: card.status }, newValue: { status: 'REVOKED' } });
+      await audit(tx, req, { action: 'CARD_REVOKED', entity: 'Card', entityId: card.id, schoolId: card.student.schoolId, oldValue: { status: card.status }, newValue: cleanJson({ status: 'REVOKED', reason: input.reason }) });
       return updated;
     });
     res.json({ card: revoked });
@@ -844,15 +855,38 @@ app.post('/api/v1/cards/:cardId/revoke', auth, roles(Role.SUPER_ADMIN, Role.ASSO
 });
 app.post('/api/v1/students/:studentId/cards', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN), async (req, res, next) => {
   try {
+    const input = cardDecisionSchema.parse(req.body ?? {});
     const student = await prisma.student.findUniqueOrThrow({ where: { id: routeParam(req.params.studentId) } });
     if (!scopedSchool(req.claims!, student.schoolId)) return res.status(403).json({ error: 'SCHOOL_SCOPE_DENIED' });
     const card = await prisma.$transaction(async tx => {
       await tx.card.updateMany({ where: { studentId: student.id, status: 'ACTIVE' }, data: { status: 'REVOKED', revokedAt: new Date() } });
       const created = await tx.card.create({ data: { studentId: student.id, publicToken: `CARD-${randomBytes(32).toString('base64url')}` } });
-      await audit(tx, req, { action: 'CARD_ISSUED', entity: 'Card', entityId: created.id, schoolId: student.schoolId, newValue: { studentId: student.id } });
+      await audit(tx, req, { action: 'CARD_ISSUED', entity: 'Card', entityId: created.id, schoolId: student.schoolId, newValue: cleanJson({ studentId: student.id, reason: input.reason }) });
       return created;
     });
     res.status(201).json({ card });
+  } catch (error) { next(error); }
+});
+app.patch('/api/v1/cards/:cardId/delivery', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN), async (req, res, next) => {
+  try {
+    const input = cardDeliverySchema.parse(req.body);
+    const card = await prisma.card.findUniqueOrThrow({ where: { id: routeParam(req.params.cardId) }, include: { student: true } });
+    if (!scopedSchool(req.claims!, card.student.schoolId)) return res.status(403).json({ error: 'SCHOOL_SCOPE_DENIED' });
+    const now = new Date();
+    const updated = await prisma.$transaction(async tx => {
+      const nextCard = await tx.card.update({
+        where: { id: card.id },
+        data: {
+          printedAt: input.printed && !card.printedAt ? now : undefined,
+          deliveredAt: input.delivered ? now : undefined,
+          deliveredByName: input.deliveredByName || undefined,
+          deliveryNote: input.deliveryNote || undefined
+        }
+      });
+      await audit(tx, req, { action: 'CARD_DELIVERY_UPDATED', entity: 'Card', entityId: card.id, schoolId: card.student.schoolId, oldValue: cleanJson({ printedAt: card.printedAt, deliveredAt: card.deliveredAt }), newValue: cleanJson(input) });
+      return nextCard;
+    });
+    res.json({ card: updated });
   } catch (error) { next(error); }
 });
 app.get('/api/v1/cards', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
@@ -1053,6 +1087,7 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
       dashboardCanteens,
       lastBackup,
       zeroWalletCount,
+      unfundedStudents,
       recentActivity
     ] = await Promise.all([
       prisma.school.count({ where: schoolId ? { id: schoolId } : {} }),
@@ -1079,8 +1114,9 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
       prisma.canteen.findMany({ where: { status: EntityStatus.ACTIVE, ...(schoolId ? { schoolId } : {}) }, select: { id: true } }),
       prisma.auditLog.findFirst({ where: { action: 'SYSTEM_BACKUP_CREATED' }, orderBy: { timestamp: 'desc' }, select: { timestamp: true } }),
       prisma.wallet.count({ where: { balance: { lte: 0 }, student: { ...studentWhere, status: EntityStatus.ACTIVE } } }),
+      prisma.student.findMany({ where: { ...studentWhere, status: EntityStatus.ACTIVE, wallet: { transactions: { none: { type: TransactionType.CREDIT } } } }, select: { id: true, fullName: true, studentCode: true, school: { select: { name: true } } }, take: 5, orderBy: { createdAt: 'desc' } }),
       prisma.auditLog.findMany({
-        where: { ...(schoolId ? { schoolId } : {}), action: { in: ['STUDENT_CREATED', 'STUDENTS_IMPORTED', 'STUDENT_UPDATED', 'STUDENT_TRANSFERRED', 'WALLET_TOP_UP', 'BULK_WALLET_TOP_UP', 'CARD_REVOKED', 'CARD_ISSUED', 'CANTEEN_SETTLED', 'SYSTEM_BACKUP_CREATED'] } },
+        where: { ...(schoolId ? { schoolId } : {}), action: { in: ['STUDENT_CREATED', 'STUDENTS_IMPORTED', 'STUDENT_UPDATED', 'STUDENT_TRANSFERRED', 'WALLET_TOP_UP', 'BULK_WALLET_TOP_UP', 'CARD_REVOKED', 'CARD_ISSUED', 'CARD_DELIVERY_UPDATED', 'CANTEEN_SETTLED', 'SYSTEM_BACKUP_CREATED', 'AUDITOR_USER_CREATED'] } },
         include: { user: { select: { email: true } }, school: { select: { name: true } } },
         orderBy: { timestamp: 'desc' },
         take: 8
@@ -1101,8 +1137,17 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
     const backupAgeHours = lastBackup ? (Date.now() - lastBackup.timestamp.getTime()) / 60 / 60 / 1000 : null;
     const backupAlert = settings.backupReminderEnabled && (!lastBackup || (backupAgeHours ?? 0) > 26);
     const busyStudents = [...dailyLimitMap.values()].filter(item => item.debit >= Math.max(20, money(item.student.dailyLimit) * 2));
-    const rawAlertsCount = lowWalletCount + dailyLimitReached.length + revokedAttempts + failedLogins + repeatedRefunds + zeroWalletCount + busyStudents.length + (backupAlert ? 1 : 0);
+    const rawAlertsCount = lowWalletCount + dailyLimitReached.length + revokedAttempts + failedLogins + repeatedRefunds + zeroWalletCount + unfundedStudents.length + busyStudents.length + (backupAlert ? 1 : 0);
     const actionItems = settings.alertsEnabled ? [
+      ...unfundedStudents.map(student => ({
+        id: `UNFUNDED_STUDENT_${student.id}`,
+        type: 'UNFUNDED_STUDENT',
+        severity: 'warn' as const,
+        title: 'طالب بدون مبلغ فسحة',
+        description: `${student.fullName} في ${student.school.name} لم يتم تخصيص مبلغ فسحة له بعد`,
+        metric: '0 تخصيص',
+        href: `/students/${student.id}`
+      })),
       ...(zeroWalletCount ? [{
         id: 'ZERO_BALANCE_STUDENTS',
         type: 'ZERO_BALANCE',
@@ -1415,8 +1460,10 @@ app.get('/api/v1/alerts', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, 
     const schoolWhere = schoolId ? { schoolId } : {};
     const today = startOfToday();
     const recent = daysAgo(7);
-    const [lowWallets, students, todayDebits, todayRefunds, revokedAttempts, loginAttempts, refundGroups] = await Promise.all([
+    const [lowWallets, zeroWallets, unfundedStudents, students, todayDebits, todayRefunds, revokedAttempts, loginAttempts, refundGroups] = await Promise.all([
       prisma.wallet.findMany({ where: { balance: { lt: settings.lowBalanceThreshold }, student: schoolWhere }, include: { student: { select: { id: true, fullName: true, studentCode: true, dailyLimit: true, school: { select: { name: true } } } } }, take: 100, orderBy: { balance: 'asc' } }),
+      prisma.wallet.findMany({ where: { balance: { lte: 0 }, student: { ...schoolWhere, status: EntityStatus.ACTIVE } }, include: { student: { select: { id: true, fullName: true, studentCode: true, school: { select: { name: true } } } } }, take: 100, orderBy: { updatedAt: 'desc' } }),
+      prisma.student.findMany({ where: { ...schoolWhere, status: EntityStatus.ACTIVE, wallet: { transactions: { none: { type: TransactionType.CREDIT } } } }, select: { id: true, fullName: true, studentCode: true, school: { select: { name: true } } }, take: 100, orderBy: { createdAt: 'desc' } }),
       prisma.student.findMany({ where: { ...schoolWhere, status: EntityStatus.ACTIVE }, select: { id: true, fullName: true, studentCode: true, dailyLimit: true, school: { select: { name: true } } } }),
       prisma.walletTransaction.findMany({ where: { ...(schoolId ? { schoolId } : {}), type: TransactionType.DEBIT, createdAt: { gte: today } }, select: { id: true, studentId: true, amount: true } }),
       prisma.walletTransaction.findMany({ where: { ...(schoolId ? { schoolId } : {}), type: TransactionType.REFUND, createdAt: { gte: today } }, select: { reference: true, studentId: true, amount: true } }),
@@ -1454,7 +1501,33 @@ app.get('/api/v1/alerts', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, 
     const revokedCardAttempts = revokedAttempts.map(log => ({ at: log.timestamp, schoolName: log.school?.name ?? '—', userEmail: log.user?.email ?? '—', token: typeof log.newValue === 'object' && log.newValue && 'cardToken' in log.newValue ? String(log.newValue.cardToken) : '—' }));
     const failedLoginAlerts = loginAttempts.map(attempt => ({ email: attempt.email, failedCount: attempt.failedCount, lockedUntil: attempt.lockedUntil, lastAttemptAt: attempt.lastAttemptAt }));
     const repeatedRefunds = refundGroups.filter(group => group._count.id >= 3).map(group => ({ userEmail: refundUserMap.get(group.performedById) ?? group.performedById, schoolName: refundSchoolMap.get(group.schoolId) ?? group.schoolId, count: group._count.id, amount: asMoney(group._sum.amount) }));
+    const zeroBalances = zeroWallets.map(wallet => ({ studentId: wallet.student.id, studentName: wallet.student.fullName, studentCode: wallet.student.studentCode, schoolName: wallet.student.school.name, balance: asMoney(wallet.balance) }));
+    const unfunded = unfundedStudents.map(student => ({ studentId: student.id, studentName: student.fullName, studentCode: student.studentCode, schoolName: student.school.name }));
+    const busyStudents = [...debitByStudent.entries()]
+      .map(([studentId, totals]) => ({ student: studentMap.get(studentId), debit: totals.debit }))
+      .filter(item => item.student && item.debit >= Math.max(20, money(item.student.dailyLimit) * 2))
+      .map(item => ({ studentId: item.student!.id, studentName: item.student!.fullName, studentCode: item.student!.studentCode, schoolName: item.student!.school.name, spentToday: asMoney(item.debit) }));
     const items = [
+      ...unfunded.map(item => ({
+        id: `UNFUNDED_${item.studentId}`,
+        type: 'UNFUNDED_STUDENT',
+        severity: 'warn' as const,
+        title: 'طالب بدون مبلغ فسحة',
+        description: `${item.studentName} — ${item.schoolName} لم يتم تخصيص مبلغ فسحة له بعد`,
+        metric: '0 تخصيص',
+        href: `/students/${item.studentId}`,
+        createdAt: today
+      })),
+      ...zeroBalances.map(item => ({
+        id: `ZERO_BALANCE_${item.studentId}`,
+        type: 'ZERO_BALANCE',
+        severity: 'danger' as const,
+        title: 'رصيد فسحة صفر',
+        description: `${item.studentName} — ${item.schoolName} لا يوجد لديه رصيد متاح`,
+        metric: `${item.balance} ر.س`,
+        href: `/students/${item.studentId}`,
+        createdAt: today
+      })),
       ...dailyLimitReached.map(item => ({
         id: `DAILY_LIMIT_${item.studentId}`,
         type: 'DAILY_LIMIT_REACHED',
@@ -1504,6 +1577,16 @@ app.get('/api/v1/alerts', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, 
         metric: item.count,
         href: '/transactions',
         createdAt: recent
+      })),
+      ...busyStudents.map(item => ({
+        id: `ABNORMAL_USAGE_${item.studentId}`,
+        type: 'ABNORMAL_USAGE',
+        severity: 'warn' as const,
+        title: 'استخدام عالي يحتاج مراجعة',
+        description: `${item.studentName} — ${item.schoolName} صرف اليوم ${item.spentToday} ر.س`,
+        metric: `${item.spentToday} ر.س`,
+        href: `/students/${item.studentId}`,
+        createdAt: today
       }))
     ].sort((a, b) => alertPriority[b.severity] - alertPriority[a.severity] || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     const visibleItems = settings.alertsEnabled ? items : [];
@@ -1518,6 +1601,10 @@ app.get('/api/v1/alerts', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, 
         revokedCardAttempts: settings.alertsEnabled ? revokedCardAttempts.length : 0,
         failedLogins: settings.alertsEnabled ? failedLoginAlerts.length : 0,
         repeatedRefunds: settings.alertsEnabled ? repeatedRefunds.length : 0
+        ,
+        zeroBalances: settings.alertsEnabled ? zeroBalances.length : 0,
+        unfundedStudents: settings.alertsEnabled ? unfunded.length : 0,
+        abnormalUsage: settings.alertsEnabled ? busyStudents.length : 0
       },
       items: visibleItems,
       lowBalances: settings.alertsEnabled ? lowBalances : [],
@@ -1525,6 +1612,9 @@ app.get('/api/v1/alerts', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, 
       revokedCardAttempts: settings.alertsEnabled ? revokedCardAttempts : [],
       failedLogins: settings.alertsEnabled ? failedLoginAlerts : [],
       repeatedRefunds: settings.alertsEnabled ? repeatedRefunds : [],
+      zeroBalances: settings.alertsEnabled ? zeroBalances : [],
+      unfundedStudents: settings.alertsEnabled ? unfunded : [],
+      abnormalUsage: settings.alertsEnabled ? busyStudents : [],
       settings: {
         lowBalanceThreshold: asMoney(settings.lowBalanceThreshold),
         alertsEnabled: settings.alertsEnabled
@@ -1689,7 +1779,7 @@ app.post('/api/v1/transactions/debit', auth, roles(Role.CANTEEN_CASHIER, Role.CA
   } catch (error) { next(error); }
 });
 
-async function refundDebit(originalId: string, claims: Claims, req: Request) {
+async function refundDebit(originalId: string, claims: Claims, req: Request, reason?: string) {
   const original = await prisma.walletTransaction.findUniqueOrThrow({ where: { id: originalId } });
   if (original.type !== TransactionType.DEBIT) throw new Error('REFUND_ONLY_DEBIT');
   if (!scopedSchool(claims, original.schoolId)) throw new Error('SCHOOL_SCOPE_DENIED');
@@ -1706,7 +1796,7 @@ async function refundDebit(originalId: string, claims: Claims, req: Request) {
     const balanceAfter = balanceBefore + amount;
     await tx.wallet.update({ where: { id: wallet.id }, data: { balance: balanceAfter } });
     const created = await tx.walletTransaction.create({ data: { reference: refundReference, walletId: wallet.id, studentId: original.studentId, schoolId: original.schoolId, canteenId: original.canteenId, amount, type: TransactionType.REFUND, balanceBefore, balanceAfter, performedById: claims.sub } });
-    await audit(tx, req, { action: 'TRANSACTION_REFUNDED', entity: 'WalletTransaction', entityId: created.id, schoolId: original.schoolId, oldValue: { originalTransactionId: original.id, amount }, newValue: cleanJson({ refundTransactionId: created.id, balanceBefore, balanceAfter }) });
+    await audit(tx, req, { action: 'TRANSACTION_REFUNDED', entity: 'WalletTransaction', entityId: created.id, schoolId: original.schoolId, oldValue: { originalTransactionId: original.id, amount }, newValue: cleanJson({ refundTransactionId: created.id, balanceBefore, balanceAfter, reason }) });
     return created;
   });
   return { transaction, replayed: false };
@@ -1714,16 +1804,17 @@ async function refundDebit(originalId: string, claims: Claims, req: Request) {
 app.post('/api/v1/transactions/refund-by-reference', auth, roles(Role.CANTEEN_CASHIER, Role.CANTEEN_OPERATOR), async (req, res, next) => {
   try {
     await assertNotCanteenOwner(prisma, req.claims!);
-    const input = z.object({ reference: z.string().trim().min(8).max(80) }).parse(req.body);
+    const input = z.object({ reference: z.string().trim().min(8).max(80), reason: z.string().trim().min(3).max(200).optional() }).parse(req.body);
     const original = await prisma.walletTransaction.findUnique({ where: { reference: input.reference } });
     if (!original) return res.status(404).json({ error: 'TRANSACTION_NOT_FOUND' });
-    const result = await refundDebit(original.id, req.claims!, req);
+    const result = await refundDebit(original.id, req.claims!, req, input.reason);
     res.status(result.replayed ? 200 : 201).json(result);
   } catch (error) { next(error); }
 });
 app.post('/api/v1/transactions/:transactionId/refund', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN), async (req, res, next) => {
   try {
-    const result = await refundDebit(routeParam(req.params.transactionId), req.claims!, req);
+    const input = z.object({ reason: z.string().trim().min(3).max(200).optional() }).parse(req.body ?? {});
+    const result = await refundDebit(routeParam(req.params.transactionId), req.claims!, req, input.reason);
     res.status(result.replayed ? 200 : 201).json(result);
   } catch (error) { next(error); }
 });

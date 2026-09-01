@@ -65,9 +65,15 @@ export default function Transactions() {
   }, []);
 
   async function refund(transaction: Transaction) {
+    const reason = prompt('سبب الاسترجاع؟ مثال: خطأ في المبلغ أو إلغاء طلب')?.trim();
+    if (!reason) return setMessage('سبب الاسترجاع مطلوب لحفظ سجل واضح.');
     if (!confirm(`استرجاع عملية صرف فسحة ${transaction.amount} ر.س للطالب ${transaction.student?.fullName ?? transaction.studentId}؟`)) return;
 
-    const response = await apiFetch(`/transactions/${transaction.id}/refund`, { method: 'POST' });
+    const response = await apiFetch(`/transactions/${transaction.id}/refund`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reason })
+    });
     const data: { error?: string } = await response.json();
 
     if (!response.ok) return setMessage(`تعذر الاسترجاع: ${data.error ?? 'UNKNOWN_ERROR'}`);

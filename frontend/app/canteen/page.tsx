@@ -230,11 +230,11 @@ export default function Canteen() {
     void loadRecentTransactions();
   }
 
-  async function refundByReference(reference: string) {
+  async function refundByReference(reference: string, reason?: string) {
     const response = await apiFetch('/transactions/refund-by-reference', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ reference })
+      body: JSON.stringify({ reference, reason })
     });
     const data: { transaction?: { amount: string; balanceAfter: string; reference: string }; error?: string; replayed?: boolean } = await response.json();
 
@@ -256,7 +256,9 @@ export default function Canteen() {
     e.preventDefault();
     const form = e.currentTarget;
     const reference = String(new FormData(form).get('reference') ?? '').trim();
-    await refundByReference(reference);
+    const reason = String(new FormData(form).get('reason') ?? '').trim();
+    if (!reason) return setNotice({ tone: 'error', text: 'اكتب سبب الاسترجاع لحفظ سجل واضح.' });
+    await refundByReference(reference, reason);
     form.reset();
   }
 
@@ -299,7 +301,11 @@ export default function Canteen() {
             {lookup && <div className="student-preview"><strong>{lookup.fullName}</strong><span>{lookup.schoolName} — {lookup.studentCode}</span><span>رصيد الفسحة: {lookup.balance} ر.س — المتبقي من الحد اليومي: {lookup.todayRemaining} ر.س</span></div>}
             <label>قيمة العملية (ر.س)<input ref={amountInput} name="amount" required type="number" min="0.01" step="0.01" /></label>
             <button disabled={processing}>{processing ? 'جاري تنفيذ العملية...' : 'تأكيد صرف الفسحة'}</button>
-            {lastTransaction && <button type="button" className="danger-button" onClick={() => void refundByReference(lastTransaction.reference)}>استرجاع آخر عملية: {lastTransaction.amount} ر.س</button>}
+            {lastTransaction && <button type="button" className="danger-button" onClick={() => {
+              const reason = prompt('سبب استرجاع آخر عملية؟')?.trim();
+              if (!reason) return setNotice({ tone: 'error', text: 'سبب الاسترجاع مطلوب.' });
+              void refundByReference(lastTransaction.reference, reason);
+            }}>استرجاع آخر عملية: {lastTransaction.amount} ر.س</button>}
           </form>
           <section className="pos-recent">
             <h2>آخر 10 عمليات</h2>
@@ -314,6 +320,7 @@ export default function Canteen() {
           <form onSubmit={refund}>
             <h2>استرجاع عملية برقمها</h2>
             <label>رقم العملية<input name="reference" required placeholder="الصق رقم العملية هنا" /></label>
+            <label>سبب الاسترجاع<input name="reason" required minLength={3} placeholder="مثال: خطأ في المبلغ" /></label>
             <button>استرجاع المبلغ</button>
           </form>
         </>

@@ -106,6 +106,10 @@ model Card {
   issuedAt DateTime @default(now())
   expiresAt DateTime?
   revokedAt DateTime?
+  printedAt DateTime?
+  deliveredAt DateTime?
+  deliveredByName String? @db.VarChar(120)
+  deliveryNote String? @db.VarChar(300)
   @@index([studentId, status])
 }
 model Wallet {

@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
+import * as XLSX from 'xlsx';
 import AdminShell from '../components/AdminShell';
 import Barcode from '../components/Barcode';
 import { apiFetch } from '../lib/api';
@@ -135,6 +136,19 @@ export default function Students() {
     void load();
   }
 
+  async function readImportFile(file: File) {
+    if (file.name.toLowerCase().endsWith('.csv')) {
+      setImportText(await file.text());
+      return;
+    }
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: 'array' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json<Array<string | number>>(sheet, { header: 1, blankrows: false });
+    const csv = rows.map(row => row.map(cell => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(',')).join('\n');
+    setImportText(csv);
+  }
+
   const activeSchools = schools.filter(school => !school.status || school.status === 'ACTIVE');
   const grades = useMemo(() => [...new Set(students.map(student => student.grade).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ar', { numeric: true })), [students]);
   const visibleStudents = useMemo(() => {
@@ -158,6 +172,9 @@ export default function Students() {
         <div>
           <h1>الطلاب</h1>
           <a href="/schools">← المدارس</a>
+        </div>
+        <div className="row-actions">
+          <button type="button" className="secondary" onClick={() => print()} disabled={!visibleStudents.length}>طباعة بطاقات النتائج</button>
         </div>
       </header>
 
@@ -204,6 +221,12 @@ export default function Students() {
         {importOpen && (
           <div className="import-box">
             <p>من Excel اختر “حفظ باسم CSV”، ثم الصق الأعمدة بهذا الترتيب: رمز الطالب، اسم الطالب، الصف، الحد اليومي، رمز المدرسة اختياري، الفصل اختياري.</p>
+            <label>رفع ملف Excel أو CSV
+              <input type="file" accept=".xlsx,.xls,.csv" onChange={event => {
+                const file = event.target.files?.[0];
+                if (file) void readImportFile(file);
+              }} />
+            </label>
             <label>مدرسة افتراضية للطلاب
               <select value={importSchoolId} onChange={event => setImportSchoolId(event.target.value)}>
                 <option value="">استخدام رمز المدرسة داخل CSV</option>

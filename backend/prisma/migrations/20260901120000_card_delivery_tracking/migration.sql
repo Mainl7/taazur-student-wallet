@@ -1,0 +1,5 @@
+ALTER TABLE `Card`
+  ADD COLUMN `printedAt` DATETIME(3) NULL,
+  ADD COLUMN `deliveredAt` DATETIME(3) NULL,
+  ADD COLUMN `deliveredByName` VARCHAR(120) NULL,
+  ADD COLUMN `deliveryNote` VARCHAR(300) NULL;

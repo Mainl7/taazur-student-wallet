@@ -69,7 +69,7 @@ export default function CanteenSettlementsPage() {
 
   return (
     <AdminShell>
-      <header><div><h1>تسوية المقصف</h1><span>مستحقات المقاصف على الجمعية بعد خصم الاسترجاعات</span></div><div className="row-actions"><button onClick={() => void load()}>تحديث</button><button type="button" className="secondary" onClick={() => print()}>إنشاء تقرير PDF</button></div></header>
+      <header><div><h1>تسوية المقصف</h1><span>مستحقات المقاصف على الجمعية بعد خصم الاسترجاعات</span></div><div className="row-actions"><button onClick={() => void load()}>تحديث</button><button type="button" className="secondary" onClick={() => print()}>إنشاء تقرير PDF</button><a href="/api/v1/exports/canteen-accounting.csv">تقرير مطابقة CSV</a></div></header>
       {message && <p role="status">{message}</p>}
       <div className="report-grid">
         {summaries.map(summary => (

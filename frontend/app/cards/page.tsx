@@ -54,9 +54,15 @@ export default function Cards() {
   useEffect(() => { void load(); }, []);
 
   async function revoke(card: Card) {
+    const reason = prompt('سبب إلغاء البطاقة؟')?.trim();
+    if (!reason) return setMessage('سبب الإلغاء مطلوب.');
     if (!confirm(`إلغاء بطاقة ${card.student.fullName}؟`)) return;
 
-    const response = await apiFetch(`/cards/${card.id}/revoke`, { method: 'POST' });
+    const response = await apiFetch(`/cards/${card.id}/revoke`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reason })
+    });
 
     if (!response.ok) return setMessage('تعذر إلغاء البطاقة.');
 
@@ -65,7 +71,13 @@ export default function Cards() {
   }
 
   async function replace(card: Card) {
-    const response = await apiFetch(`/students/${card.student.id}/cards`, { method: 'POST' });
+    const reason = prompt('سبب إصدار البطاقة البديلة؟')?.trim();
+    if (!reason) return setMessage('سبب إصدار البطاقة البديلة مطلوب.');
+    const response = await apiFetch(`/students/${card.student.id}/cards`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reason })
+    });
 
     if (!response.ok) return setMessage('تعذر إصدار بطاقة بديلة.');
 

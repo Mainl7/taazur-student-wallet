@@ -25,6 +25,7 @@ export default function CanteenUsers() {
   const activeSchools = useMemo(() => schools.filter(school => school.status === 'ACTIVE'), [schools]);
   const cashierUsers = useMemo(() => users.filter(user => user.role === 'CANTEEN_CASHIER' || (user.role === 'CANTEEN_OPERATOR' && !!user.school)), [users]);
   const ownerUsers = useMemo(() => users.filter(user => user.role === 'CANTEEN_OWNER' || (user.role === 'CANTEEN_OPERATOR' && !user.school)), [users]);
+  const auditorUsers = useMemo(() => users.filter(user => user.role === 'AUDITOR'), [users]);
 
   const load = async () => {
     const [schoolResponse, userResponse, canteenResponse] = await Promise.all([apiFetch('/schools'), apiFetch('/canteen-users'), apiFetch('/canteens')]);
@@ -76,6 +77,26 @@ export default function CanteenUsers() {
 
     form.reset();
     setMessage('تم إنشاء حساب مالك المقصف. اربط المقاصف التابعة له من نموذج إضافة المقصف.');
+    void load();
+  }
+
+  async function createAuditorAccount(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const body = Object.fromEntries(new FormData(form));
+    if (!body.schoolId) delete body.schoolId;
+
+    const response = await apiFetch('/canteen-users', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...body, role: 'AUDITOR' })
+    });
+    const data: { error?: string } = await response.json();
+
+    if (!response.ok) return setMessage(`تعذر إنشاء حساب المدقق: ${data.error ?? 'UNKNOWN_ERROR'}`);
+
+    form.reset();
+    setMessage('تم إنشاء حساب مدقق/مشاهد فقط. يستطيع الاطلاع على البيانات والتقارير بدون تعديل.');
     void load();
   }
 
@@ -177,12 +198,28 @@ export default function CanteenUsers() {
         </form>
       </section>
 
+      <section className="dashboard-section">
+        <div className="section-title compact">
+          <h2>إنشاء حساب مدقق / مشاهد فقط</h2>
+          <span>هذا الحساب يراجع التقارير والسجلات بدون صلاحية إضافة أو تعديل</span>
+        </div>
+        <form className="entry" onSubmit={createAuditorAccount}>
+          <input name="email" type="email" placeholder="بريد المدقق" autoComplete="off" required />
+          <input name="password" type="password" minLength={12} placeholder="كلمة مرور 12 حرف أو أكثر" autoComplete="new-password" required />
+          <select name="schoolId" defaultValue="">
+            <option value="">كل المدارس حسب صلاحية المدير</option>
+            {activeSchools.map(school => <option key={school.id} value={school.id}>{school.name} — {school.schoolCode}</option>)}
+          </select>
+          <button>إنشاء حساب مدقق</button>
+        </form>
+      </section>
+
       {message && <p role="status">{message}</p>}
 
       {resetUser && (
         <section className="dashboard-section">
           <div className="section-title compact">
-            <h2>تغيير كلمة مرور {resetUser.school ? 'حساب المقصف' : 'مالك المقصف'}</h2>
+            <h2>تغيير كلمة مرور {resetUser.role === 'AUDITOR' ? 'حساب المدقق' : resetUser.school ? 'حساب المقصف' : 'مالك المقصف'}</h2>
             <span>لن تظهر كلمة المرور بعد الحفظ، وسيتم إزالة قفل محاولات الدخول الفاشلة لهذا الحساب</span>
           </div>
           <form className="entry" onSubmit={resetPassword}>
@@ -215,6 +252,15 @@ export default function CanteenUsers() {
         <tbody>
           {cashierUsers.map(user => <tr key={user.id}><td>{user.email}</td><td>{user.school?.name}<br /><small>{user.school?.schoolCode}</small></td><td>{new Date(user.createdAt).toLocaleString('ar-SA')}</td><td><button type="button" onClick={() => setResetUser(user)}>تغيير كلمة المرور</button></td></tr>)}
           {!cashierUsers.length && <tr><td colSpan={4}>لا توجد حسابات مقصف/كاشير حتى الآن.</td></tr>}
+        </tbody>
+      </table>
+
+      <h2>حسابات المدققين / المشاهدين فقط</h2>
+      <table>
+        <thead><tr><th>البريد</th><th>نطاق المدرسة</th><th>تاريخ الإنشاء</th><th>الإجراء</th></tr></thead>
+        <tbody>
+          {auditorUsers.map(user => <tr key={user.id}><td>{user.email}</td><td>{user.school ? <>{user.school.name}<br /><small>{user.school.schoolCode}</small></> : 'كل المدارس'}</td><td>{new Date(user.createdAt).toLocaleString('ar-SA')}</td><td><button type="button" onClick={() => setResetUser(user)}>تغيير كلمة المرور</button></td></tr>)}
+          {!auditorUsers.length && <tr><td colSpan={4}>لا توجد حسابات مدققين حتى الآن.</td></tr>}
         </tbody>
       </table>
     </AdminShell>

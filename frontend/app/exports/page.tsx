@@ -49,6 +49,9 @@ export default function ExportsPage() {
         <a className="export-card" href={`/api/v1/exports/students.csv${schoolQuery}`}>
           <strong>تصدير الطلاب</strong><span>بيانات الطلاب ورصيد الفسحة ورمز البطاقة النشطة.</span>
         </a>
+        <a className="export-card" href={apiExportUrl('canteen-accounting.csv', query)}>
+          <strong>تقرير مطابقة المقصف</strong><span>المستحقات الحالية، الاسترجاعات، التسويات السابقة، والمتبقي للمحاسبة.</span>
+        </a>
       </div>
     </AdminShell>
   );

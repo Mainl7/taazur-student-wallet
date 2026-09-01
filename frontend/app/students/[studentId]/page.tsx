@@ -17,7 +17,7 @@ type StudentDetails = {
     weeklyLimit?: string | null;
     school: { name: string; schoolCode: string; city: string };
     wallet: { balance: string; currency: string; status: string; updatedAt: string } | null;
-    cards: Array<{ id: string; publicToken: string; status: string; issuedAt: string; revokedAt?: string | null; expiresAt?: string | null }>;
+    cards: Array<{ id: string; publicToken: string; status: string; issuedAt: string; revokedAt?: string | null; expiresAt?: string | null; printedAt?: string | null; deliveredAt?: string | null; deliveredByName?: string | null; deliveryNote?: string | null }>;
   };
   transactions: Array<{
     id: string;
@@ -54,18 +54,44 @@ export default function StudentDetailsPage() {
   }, [params.studentId]);
 
   async function revokeCard(cardId: string) {
+    const reason = prompt('سبب إلغاء البطاقة؟ مثال: فقدان البطاقة أو إصدار بديل')?.trim();
+    if (!reason) return setMessage('سبب الإلغاء مطلوب لحفظ سجل واضح.');
     if (!confirm('سيتم إلغاء هذه البطاقة ولن تعمل عند المقصف. هل تريد المتابعة؟')) return;
-    const response = await apiFetch(`/cards/${cardId}/revoke`, { method: 'POST' });
+    const response = await apiFetch(`/cards/${cardId}/revoke`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reason })
+    });
     if (!response.ok) return setMessage('تعذر إلغاء البطاقة.');
     setMessage('تم إلغاء البطاقة.');
     void load();
   }
 
   async function replaceCard() {
+    const reason = prompt('سبب إصدار بطاقة بديلة؟')?.trim();
+    if (!reason) return setMessage('سبب إصدار البطاقة البديلة مطلوب.');
     if (!confirm('سيتم إلغاء البطاقة النشطة وإصدار بطاقة QR جديدة للطالب. هل تريد المتابعة؟')) return;
-    const response = await apiFetch(`/students/${params.studentId}/cards`, { method: 'POST' });
+    const response = await apiFetch(`/students/${params.studentId}/cards`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reason })
+    });
     if (!response.ok) return setMessage('تعذر إصدار بطاقة بديلة.');
     setMessage('تم إصدار بطاقة بديلة. اطبع البطاقة الجديدة من صفحة الطلاب أو البطاقات.');
+    void load();
+  }
+
+  async function updateDelivery(cardId: string) {
+    const deliveredByName = prompt('اسم من سلّم البطاقة؟')?.trim();
+    if (!deliveredByName) return setMessage('اكتب اسم من سلّم البطاقة لحفظ السجل.');
+    const deliveryNote = prompt('ملاحظة اختيارية للتسليم:')?.trim() ?? '';
+    const response = await apiFetch(`/cards/${cardId}/delivery`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ printed: true, delivered: true, deliveredByName, deliveryNote })
+    });
+    if (!response.ok) return setMessage('تعذر تسجيل تسليم البطاقة.');
+    setMessage('تم تسجيل طباعة وتسليم البطاقة.');
     void load();
   }
 
@@ -107,9 +133,9 @@ export default function StudentDetailsPage() {
             <button type="button" onClick={() => void replaceCard()}>إصدار بطاقة بديلة</button>
           </div>
           <table>
-            <thead><tr><th>رمز البطاقة</th><th>الحالة</th><th>تاريخ الإصدار</th><th>تاريخ الإلغاء</th><th>الإجراء</th></tr></thead>
+            <thead><tr><th>رمز البطاقة</th><th>الحالة</th><th>تاريخ الإصدار</th><th>الطباعة</th><th>التسليم</th><th>تاريخ الإلغاء</th><th>الإجراء</th></tr></thead>
             <tbody>
-              {[...activeCards, ...revokedCards].map(card => <tr key={card.id}><td className="token">{card.publicToken}</td><td>{card.status}</td><td>{new Date(card.issuedAt).toLocaleString('ar-SA')}</td><td>{card.revokedAt ? new Date(card.revokedAt).toLocaleString('ar-SA') : '—'}</td><td>{card.status === 'ACTIVE' ? <button type="button" className="danger-button" onClick={() => void revokeCard(card.id)}>إلغاء البطاقة</button> : '—'}</td></tr>)}
+              {[...activeCards, ...revokedCards].map(card => <tr key={card.id}><td className="token">{card.publicToken}</td><td>{card.status}</td><td>{new Date(card.issuedAt).toLocaleString('ar-SA')}</td><td>{card.printedAt ? new Date(card.printedAt).toLocaleString('ar-SA') : 'لم تسجل'}</td><td>{card.deliveredAt ? `${new Date(card.deliveredAt).toLocaleString('ar-SA')} — ${card.deliveredByName ?? '—'}` : 'لم تسلم'}</td><td>{card.revokedAt ? new Date(card.revokedAt).toLocaleString('ar-SA') : '—'}</td><td><div className="row-actions">{card.status === 'ACTIVE' && <button type="button" className="secondary" onClick={() => void updateDelivery(card.id)}>تسجيل التسليم</button>}{card.status === 'ACTIVE' ? <button type="button" className="danger-button" onClick={() => void revokeCard(card.id)}>إلغاء البطاقة</button> : '—'}</div></td></tr>)}
             </tbody>
           </table>
 
