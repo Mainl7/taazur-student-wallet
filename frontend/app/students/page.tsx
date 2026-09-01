@@ -35,6 +35,10 @@ export default function Students() {
   const [filterGrade, setFilterGrade] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [lowBalanceOnly, setLowBalanceOnly] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importSchoolId, setImportSchoolId] = useState('');
+  const [importText, setImportText] = useState('');
+  const [importResults, setImportResults] = useState<Array<{ row: number; studentCode: string; status: string; message: string }>>([]);
   const [message, setMessage] = useState('');
 
   const load = async () => {
@@ -85,6 +89,49 @@ export default function Students() {
 
     setEditing(null);
     setMessage('تم تعديل بيانات الطالب. إذا تغيّرت المدرسة، تم نقل سجلاته المالية للمدرسة الجديدة.');
+    void load();
+  }
+
+  function parseCsvLine(line: string) {
+    const cells: string[] = [];
+    let current = '';
+    let quoted = false;
+    for (let index = 0; index < line.length; index += 1) {
+      const char = line[index];
+      const next = line[index + 1];
+      if (char === '"' && quoted && next === '"') {
+        current += '"';
+        index += 1;
+      } else if (char === '"') {
+        quoted = !quoted;
+      } else if (char === ',' && !quoted) {
+        cells.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    cells.push(current.trim());
+    return cells;
+  }
+
+  async function importStudents() {
+    const lines = importText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    if (!lines.length) return setMessage('الصق بيانات CSV أولًا.');
+    const hasHeader = /studentCode|رمز|اسم|fullName/i.test(lines[0]);
+    const rows = lines.slice(hasHeader ? 1 : 0).map(line => {
+      const [studentCode, fullName, grade, dailyLimit, schoolCode, className] = parseCsvLine(line);
+      return { studentCode, fullName, grade, dailyLimit, schoolCode: schoolCode || undefined, className: className || undefined };
+    });
+    const response = await apiFetch('/students/import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ defaultSchoolId: importSchoolId || undefined, rows })
+    });
+    const data: { createdCount?: number; totalRows?: number; results?: typeof importResults; error?: string } = await response.json().catch(() => ({}));
+    if (!response.ok) return setMessage(`تعذر استيراد الطلاب: ${data.error ?? 'تأكد من الأعمدة والبيانات'}`);
+    setImportResults(Array.isArray(data.results) ? data.results : []);
+    setMessage(`تم استيراد ${data.createdCount ?? 0} طالب من أصل ${data.totalRows ?? rows.length}.`);
     void load();
   }
 
@@ -148,6 +195,35 @@ export default function Students() {
       )}
 
       {message && <p role="status">{message}</p>}
+
+      <section className="panel">
+        <div className="section-title compact">
+          <h2>استيراد الطلاب من Excel / CSV</h2>
+          <button type="button" className="secondary" onClick={() => setImportOpen(!importOpen)}>{importOpen ? 'إخفاء الاستيراد' : 'فتح الاستيراد'}</button>
+        </div>
+        {importOpen && (
+          <div className="import-box">
+            <p>من Excel اختر “حفظ باسم CSV”، ثم الصق الأعمدة بهذا الترتيب: رمز الطالب، اسم الطالب، الصف، الحد اليومي، رمز المدرسة اختياري، الفصل اختياري.</p>
+            <label>مدرسة افتراضية للطلاب
+              <select value={importSchoolId} onChange={event => setImportSchoolId(event.target.value)}>
+                <option value="">استخدام رمز المدرسة داخل CSV</option>
+                {activeSchools.map(school => <option key={school.id} value={school.id}>{school.name}</option>)}
+              </select>
+            </label>
+            <textarea value={importText} onChange={event => setImportText(event.target.value)} rows={7} placeholder={'studentCode,fullName,grade,dailyLimit,schoolCode,className\nSTU-001,محمد أحمد,أول ابتدائي,10,TAZ-001,أ'} />
+            <div className="row-actions">
+              <button type="button" onClick={() => void importStudents()}>استيراد الطلاب</button>
+              <button type="button" className="secondary" onClick={() => { setImportText(''); setImportResults([]); }}>مسح</button>
+            </div>
+            {importResults.length > 0 && (
+              <table>
+                <thead><tr><th>السطر</th><th>رمز الطالب</th><th>الحالة</th><th>الملاحظة</th></tr></thead>
+                <tbody>{importResults.slice(0, 20).map(result => <tr key={`${result.row}-${result.studentCode}`}><td>{result.row}</td><td>{result.studentCode}</td><td>{result.status}</td><td>{result.message}</td></tr>)}</tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </section>
 
       <form className="entry student-tools">
         <label>

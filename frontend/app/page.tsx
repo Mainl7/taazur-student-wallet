@@ -10,6 +10,7 @@ type DaySpend = { date: string; amount: string; count: number; percentage: numbe
 type RankedStudent = { studentId: string; fullName: string; studentCode: string; schoolName: string; count: number; amount: string };
 type RankedSchool = { schoolId: string; schoolName: string; schoolCode: string; count: number; amount: string };
 type AlertAction = { id: string; type: string; severity: 'danger' | 'warn' | 'info'; title: string; description: string; metric: string | number; href: string };
+type ActivityItem = { id: string; action: string; entity: string; entityId: string; schoolName?: string | null; userEmail: string; timestamp: string };
 type Dashboard = {
   schools: number;
   students: number;
@@ -34,10 +35,23 @@ type Dashboard = {
     actionItems?: AlertAction[];
   };
   canteen: { unsettledTotal: string; canteensWithDue: number };
+  recentActivity: ActivityItem[];
 };
 
 const periodLabels: Record<Period, string> = { today: 'اليوم', week: 'الأسبوع', month: 'الشهر', custom: 'الفترة المختارة' };
 const todayInputValue = () => new Date().toISOString().slice(0, 10);
+const activityLabels: Record<string, string> = {
+  STUDENT_CREATED: 'إضافة طالب',
+  STUDENTS_IMPORTED: 'استيراد طلاب',
+  STUDENT_UPDATED: 'تعديل طالب',
+  STUDENT_TRANSFERRED: 'نقل طالب',
+  WALLET_TOP_UP: 'تخصيص مبلغ فسحة',
+  BULK_WALLET_TOP_UP: 'تخصيص مبالغ جماعي',
+  CARD_REVOKED: 'إلغاء بطاقة',
+  CARD_ISSUED: 'إصدار بطاقة',
+  CANTEEN_SETTLED: 'تسوية مقصف',
+  SYSTEM_BACKUP_CREATED: 'نسخة احتياطية'
+};
 
 export default function DashboardPage() {
   const [data, setData] = useState<Dashboard | null>(null);
@@ -220,6 +234,23 @@ export default function DashboardPage() {
         <a href="/cards">طباعة البطاقات ←</a>
         <a href="/exports">تصدير تقرير شهري ←</a>
         <a href="/canteen-users">إنشاء حساب مقصف ←</a>
+      </section>
+
+      <section className="panel">
+        <div className="section-title compact">
+          <h2>آخر نشاطات الإدارة</h2>
+          <a href="/audit-logs">السجل الكامل ←</a>
+        </div>
+        <div className="activity-feed">
+          {data?.recentActivity?.map(item => (
+            <article key={item.id}>
+              <strong>{activityLabels[item.action] ?? item.action}</strong>
+              <span>{item.userEmail} {item.schoolName ? `— ${item.schoolName}` : ''}</span>
+              <small>{new Date(item.timestamp).toLocaleString('ar-SA')}</small>
+            </article>
+          ))}
+          {!data?.recentActivity?.length && <p className="empty-state">لا توجد نشاطات إدارية حديثة.</p>}
+        </div>
       </section>
     </AdminShell>
   );

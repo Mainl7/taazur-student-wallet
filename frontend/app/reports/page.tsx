@@ -53,6 +53,7 @@ export default function ReportsPage() {
           <button onClick={() => void load()}>تحديث التقرير</button>
           <a href={exportUrl('monthly-expenses.xls', query)}>Excel</a>
           <a href={exportUrl('monthly-expenses-print', query)} target="_blank" rel="noreferrer">PDF</a>
+          <a href={exportUrl('canteen-accounting.csv', query)}>تقرير المقاصف المحاسبي</a>
         </div>
       </header>
       {message && <p role="status">{message}</p>}

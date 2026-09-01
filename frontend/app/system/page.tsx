@@ -156,6 +156,17 @@ export default function SystemHealth() {
             </div>
           </section>
 
+          <section className="panel launch-checklist">
+            <h2>قائمة ما قبل الإطلاق الرسمي</h2>
+            <label className="check-control"><input type="checkbox" readOnly checked={!!status.officialAdmin && status.officialAdmin.status === 'ACTIVE'} /> حساب المدير الرسمي نشط</label>
+            <label className="check-control"><input type="checkbox" readOnly checked={status.counts.schools > 0} /> تمت إضافة المدارس الحقيقية</label>
+            <label className="check-control"><input type="checkbox" readOnly checked={status.counts.students > 0} /> تمت إضافة الطلاب الحقيقيين</label>
+            <label className="check-control"><input type="checkbox" readOnly checked={status.counts.canteens > 0} /> تمت إضافة وربط المقاصف</label>
+            <label className="check-control"><input type="checkbox" readOnly checked={!!status.lastBackup} /> توجد نسخة احتياطية حديثة قبل التشغيل</label>
+            <label className="check-control"><input type="checkbox" readOnly checked={status.counts.openErrors === 0} /> لا توجد أخطاء مفتوحة تحتاج مراجعة</label>
+            <p>قبل الاعتماد النهائي: جرّب شراء، استرجاع، تخصيص مبلغ فسحة، طباعة بطاقة QR، تنزيل Excel/PDF، والدخول من جوالين مختلفين.</p>
+          </section>
+
           {settingsDraft && (
             <section className="panel">
               <h2>إعدادات التشغيل</h2>

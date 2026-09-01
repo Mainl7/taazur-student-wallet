@@ -36,7 +36,7 @@ app.use((req, res, next) => {
   if (unsafe && origin && !allowedOrigins.includes(origin)) return res.status(403).json({ error: 'ORIGIN_DENIED' });
   next();
 });
-app.use(express.json({ limit: '32kb' }));
+app.use(express.json({ limit: '256kb' }));
 
 type Claims = { sub: string; role: Role; schoolId?: string; sid?: string };
 type CanteenAccess = { canteenId: string | null; schoolId: string; name: string };
@@ -688,6 +688,18 @@ app.post('/api/v1/canteens', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
 
 const studentSchema = z.object({ studentCode: z.string().trim().min(3).max(32), fullName: z.string().trim().min(3).max(150), grade: z.string().trim().min(1).max(32), className: z.string().trim().max(32).optional(), schoolId: z.string().cuid(), dailyLimit: z.coerce.number().positive().max(500), weeklyLimit: z.coerce.number().positive().max(2000).optional() });
 const studentUpdateSchema = studentSchema.extend({ status: z.nativeEnum(EntityStatus).optional() }).partial();
+const studentImportSchema = z.object({
+  defaultSchoolId: z.string().cuid().optional(),
+  rows: z.array(z.object({
+    studentCode: z.string().trim().min(3).max(32),
+    fullName: z.string().trim().min(3).max(150),
+    grade: z.string().trim().min(1).max(32),
+    className: z.string().trim().max(32).optional(),
+    dailyLimit: z.coerce.number().positive().max(500),
+    schoolId: z.string().cuid().optional(),
+    schoolCode: z.string().trim().max(64).optional()
+  })).min(1).max(500)
+});
 app.get('/api/v1/students', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
   try {
     const schoolId = typeof req.query.schoolId === 'string' ? req.query.schoolId : req.claims!.schoolId;
@@ -735,6 +747,65 @@ app.post('/api/v1/students', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
       return created;
     });
     res.status(201).json({ student });
+  } catch (error) { next(error); }
+});
+app.post('/api/v1/students/import', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN), async (req, res, next) => {
+  try {
+    const input = studentImportSchema.parse(req.body);
+    if (input.defaultSchoolId && !scopedSchool(req.claims!, input.defaultSchoolId)) return res.status(403).json({ error: 'SCHOOL_SCOPE_DENIED' });
+
+    const schoolCodes = [...new Set(input.rows.map(row => row.schoolCode).filter(Boolean) as string[])];
+    const schoolsByCodeRows = schoolCodes.length ? await prisma.school.findMany({ where: { schoolCode: { in: schoolCodes } }, select: { id: true, schoolCode: true, status: true } }) : [];
+    const schoolByCode = new Map(schoolsByCodeRows.map(school => [school.schoolCode, school]));
+    const existingCodes = await prisma.student.findMany({ where: { studentCode: { in: input.rows.map(row => row.studentCode) } }, select: { studentCode: true } });
+    const existingCodeSet = new Set(existingCodes.map(student => student.studentCode));
+
+    const results: Array<{ row: number; studentCode: string; status: 'created' | 'skipped' | 'failed'; message: string }> = [];
+    let createdCount = 0;
+
+    await prisma.$transaction(async tx => {
+      for (const [index, row] of input.rows.entries()) {
+        if (existingCodeSet.has(row.studentCode)) {
+          results.push({ row: index + 1, studentCode: row.studentCode, status: 'skipped', message: 'رمز الطالب موجود مسبقًا' });
+          continue;
+        }
+
+        const resolvedSchoolId = row.schoolId || input.defaultSchoolId || (row.schoolCode ? schoolByCode.get(row.schoolCode)?.id : undefined);
+        if (!resolvedSchoolId) {
+          results.push({ row: index + 1, studentCode: row.studentCode, status: 'failed', message: 'لم يتم تحديد المدرسة' });
+          continue;
+        }
+        if (!scopedSchool(req.claims!, resolvedSchoolId)) {
+          results.push({ row: index + 1, studentCode: row.studentCode, status: 'failed', message: 'المدرسة خارج صلاحيتك' });
+          continue;
+        }
+
+        const school = await tx.school.findUnique({ where: { id: resolvedSchoolId }, select: { status: true } });
+        if (!school || school.status !== EntityStatus.ACTIVE) {
+          results.push({ row: index + 1, studentCode: row.studentCode, status: 'failed', message: 'المدرسة غير موجودة أو غير نشطة' });
+          continue;
+        }
+
+        const created = await tx.student.create({
+          data: {
+            studentCode: row.studentCode,
+            fullName: row.fullName,
+            grade: row.grade,
+            className: row.className || undefined,
+            dailyLimit: row.dailyLimit,
+            schoolId: resolvedSchoolId
+          }
+        });
+        await tx.wallet.create({ data: { studentId: created.id } });
+        await tx.card.create({ data: { studentId: created.id, publicToken: `CARD-${randomBytes(32).toString('base64url')}` } });
+        existingCodeSet.add(row.studentCode);
+        createdCount += 1;
+        results.push({ row: index + 1, studentCode: row.studentCode, status: 'created', message: 'تمت الإضافة' });
+      }
+      await audit(tx, req, { action: 'STUDENTS_IMPORTED', entity: 'Student', entityId: 'bulk-import', schoolId: input.defaultSchoolId ?? req.claims?.schoolId, newValue: cleanJson({ totalRows: input.rows.length, createdCount }) });
+    });
+
+    res.status(201).json({ createdCount, totalRows: input.rows.length, results });
   } catch (error) { next(error); }
 });
 app.patch('/api/v1/students/:studentId', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN), async (req, res, next) => {
@@ -980,7 +1051,9 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
       topStudentGroups,
       topSchoolGroups,
       dashboardCanteens,
-      lastBackup
+      lastBackup,
+      zeroWalletCount,
+      recentActivity
     ] = await Promise.all([
       prisma.school.count({ where: schoolId ? { id: schoolId } : {} }),
       prisma.student.count({ where: { ...studentWhere, status: EntityStatus.ACTIVE } }),
@@ -1004,7 +1077,14 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
       prisma.walletTransaction.groupBy({ by: ['studentId'], where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: periodDateFilter }, _sum: { amount: true }, _count: { id: true }, orderBy: { _count: { id: 'desc' } }, take: 5 }),
       prisma.walletTransaction.groupBy({ by: ['schoolId'], where: { ...transactionWhere, type: TransactionType.DEBIT, createdAt: periodDateFilter }, _sum: { amount: true }, _count: { id: true }, orderBy: { _count: { id: 'desc' } }, take: 5 }),
       prisma.canteen.findMany({ where: { status: EntityStatus.ACTIVE, ...(schoolId ? { schoolId } : {}) }, select: { id: true } }),
-      prisma.auditLog.findFirst({ where: { action: 'SYSTEM_BACKUP_CREATED' }, orderBy: { timestamp: 'desc' }, select: { timestamp: true } })
+      prisma.auditLog.findFirst({ where: { action: 'SYSTEM_BACKUP_CREATED' }, orderBy: { timestamp: 'desc' }, select: { timestamp: true } }),
+      prisma.wallet.count({ where: { balance: { lte: 0 }, student: { ...studentWhere, status: EntityStatus.ACTIVE } } }),
+      prisma.auditLog.findMany({
+        where: { ...(schoolId ? { schoolId } : {}), action: { in: ['STUDENT_CREATED', 'STUDENTS_IMPORTED', 'STUDENT_UPDATED', 'STUDENT_TRANSFERRED', 'WALLET_TOP_UP', 'BULK_WALLET_TOP_UP', 'CARD_REVOKED', 'CARD_ISSUED', 'CANTEEN_SETTLED', 'SYSTEM_BACKUP_CREATED'] } },
+        include: { user: { select: { email: true } }, school: { select: { name: true } } },
+        orderBy: { timestamp: 'desc' },
+        take: 8
+      })
     ]);
 
     const dailyLimitMap = new Map(activeStudentRows.map(student => [student.id, { student, debit: 0, refund: 0 }]));
@@ -1020,8 +1100,18 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
     const repeatedRefunds = refundGroups.filter(group => group._count.id >= 3).length;
     const backupAgeHours = lastBackup ? (Date.now() - lastBackup.timestamp.getTime()) / 60 / 60 / 1000 : null;
     const backupAlert = settings.backupReminderEnabled && (!lastBackup || (backupAgeHours ?? 0) > 26);
-    const rawAlertsCount = lowWalletCount + dailyLimitReached.length + revokedAttempts + failedLogins + repeatedRefunds + (backupAlert ? 1 : 0);
+    const busyStudents = [...dailyLimitMap.values()].filter(item => item.debit >= Math.max(20, money(item.student.dailyLimit) * 2));
+    const rawAlertsCount = lowWalletCount + dailyLimitReached.length + revokedAttempts + failedLogins + repeatedRefunds + zeroWalletCount + busyStudents.length + (backupAlert ? 1 : 0);
     const actionItems = settings.alertsEnabled ? [
+      ...(zeroWalletCount ? [{
+        id: 'ZERO_BALANCE_STUDENTS',
+        type: 'ZERO_BALANCE',
+        severity: 'danger' as const,
+        title: 'طلاب رصيد الفسحة لديهم صفر',
+        description: `${zeroWalletCount} طالب نشط لا يوجد لديه رصيد فسحة متاح`,
+        metric: zeroWalletCount,
+        href: '/students'
+      }] : []),
       ...lowWallets.map(wallet => ({
         id: `LOW_BALANCE_${wallet.student.id}`,
         type: 'LOW_BALANCE',
@@ -1038,6 +1128,15 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
         title: 'طالب وصل الحد اليومي',
         description: `${item.student.fullName} صرف ${asMoney(Math.max(0, item.debit - item.refund))} من حد ${asMoney(item.student.dailyLimit)} ر.س`,
         metric: `${asMoney(Math.max(0, item.debit - item.refund))}/${asMoney(item.student.dailyLimit)}`,
+        href: `/students/${item.student.id}`
+      })),
+      ...busyStudents.slice(0, 5).map(item => ({
+        id: `ABNORMAL_USAGE_${item.student.id}`,
+        type: 'ABNORMAL_USAGE',
+        severity: 'warn' as const,
+        title: 'استخدام عالي يحتاج مراجعة',
+        description: `${item.student.fullName} صرف اليوم ${asMoney(item.debit)} ر.س، أعلى من النمط المتوقع`,
+        metric: `${asMoney(item.debit)} ر.س`,
         href: `/students/${item.student.id}`
       })),
       ...(revokedAttempts ? [{
@@ -1137,6 +1236,15 @@ app.get('/api/v1/dashboard', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMI
         actionItems
       },
       canteen: { unsettledTotal: asMoney(canteenUnsettledTotal), canteensWithDue },
+      recentActivity: recentActivity.map(log => ({
+        id: log.id,
+        action: log.action,
+        entity: log.entity,
+        entityId: log.entityId,
+        schoolName: log.school?.name ?? null,
+        userEmail: log.user?.email ?? 'النظام',
+        timestamp: log.timestamp
+      })),
       settings: {
         organizationName: settings.organizationName,
         lowBalanceThreshold: asMoney(settings.lowBalanceThreshold),
@@ -1454,6 +1562,29 @@ app.get('/api/v1/exports/monthly-expenses-print', auth, roles(Role.SUPER_ADMIN, 
   try {
     const { rows, month } = await monthlyExpenseRows(req);
     sendPrintableReport(res, `تقرير مصروفات الطلاب الشهري ${month}`, rows);
+  } catch (error) { next(error); }
+});
+
+app.get('/api/v1/exports/canteen-accounting.csv', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
+  try {
+    const schoolId = scopedSchoolFromQuery(req);
+    const createdAt = parseDateRange(req.query as Record<string, unknown>);
+    const canteens = await prisma.canteen.findMany({
+      where: { status: EntityStatus.ACTIVE, ...(schoolId ? { schoolId } : {}) },
+      select: { id: true },
+      orderBy: { createdAt: 'desc' }
+    });
+    const summaries = await Promise.all(canteens.map(canteen => canteenDueByCanteen(canteen.id, req.claims!)));
+    const settlements = await prisma.canteenSettlement.findMany({
+      where: { ...(schoolId ? { schoolId } : {}), ...(createdAt ? { createdAt } : {}) },
+      include: { canteen: { select: { name: true, canteenCode: true } }, canteenUser: { select: { email: true } }, school: { select: { name: true } }, settledBy: { select: { email: true } } },
+      orderBy: { createdAt: 'desc' }
+    });
+    sendCsv(res, 'taazur-canteen-accounting.csv', [
+      ['القسم', 'المدرسة', 'المقصف', 'المشغل/المالك', 'مصروفات الفسحة', 'الاسترجاعات', 'المستحق الحالي', 'عدد العمليات', 'تاريخ/فترة', 'المسدد بواسطة', 'ملاحظة'],
+      ...summaries.map(summary => ['المستحق الحالي', summary.canteen?.school.name ?? summary.canteenUser.school?.name ?? '—', summary.canteen?.name ?? 'مقصف قديم', summary.canteenUser.email, summary.debit, summary.refund, summary.net, summary.transactionCount, `${summary.periodStart.toLocaleDateString('ar-SA')} - ${summary.periodEnd.toLocaleDateString('ar-SA')}`, '', '']),
+      ...settlements.map(settlement => ['تسوية مسددة', settlement.school?.name ?? '—', settlement.canteen?.name ?? 'مقصف قديم', settlement.canteenUser.email, '', '', asMoney(settlement.amount), settlement.transactionCount, `${settlement.periodStart.toLocaleDateString('ar-SA')} - ${settlement.periodEnd.toLocaleDateString('ar-SA')}`, settlement.settledBy.email, settlement.note ?? ''])
+    ]);
   } catch (error) { next(error); }
 });
 

@@ -40,17 +40,34 @@ export default function StudentDetailsPage() {
   const [data, setData] = useState<StudentDetails | null>(null);
   const [message, setMessage] = useState('جاري تحميل ملف الطالب...');
 
+  const load = async () => {
+    const response = await apiFetch(`/students/${params.studentId}/details`);
+    if (response.status === 401) return location.assign('/login');
+    const nextData: StudentDetails & { error?: string } = await response.json();
+    if (!response.ok) return setMessage(`تعذر تحميل ملف الطالب: ${nextData.error ?? 'UNKNOWN_ERROR'}`);
+    setData(nextData);
+    setMessage('');
+  };
+
   useEffect(() => {
-    const load = async () => {
-      const response = await apiFetch(`/students/${params.studentId}/details`);
-      if (response.status === 401) return location.assign('/login');
-      const nextData: StudentDetails & { error?: string } = await response.json();
-      if (!response.ok) return setMessage(`تعذر تحميل ملف الطالب: ${nextData.error ?? 'UNKNOWN_ERROR'}`);
-      setData(nextData);
-      setMessage('');
-    };
     void load();
   }, [params.studentId]);
+
+  async function revokeCard(cardId: string) {
+    if (!confirm('سيتم إلغاء هذه البطاقة ولن تعمل عند المقصف. هل تريد المتابعة؟')) return;
+    const response = await apiFetch(`/cards/${cardId}/revoke`, { method: 'POST' });
+    if (!response.ok) return setMessage('تعذر إلغاء البطاقة.');
+    setMessage('تم إلغاء البطاقة.');
+    void load();
+  }
+
+  async function replaceCard() {
+    if (!confirm('سيتم إلغاء البطاقة النشطة وإصدار بطاقة QR جديدة للطالب. هل تريد المتابعة؟')) return;
+    const response = await apiFetch(`/students/${params.studentId}/cards`, { method: 'POST' });
+    if (!response.ok) return setMessage('تعذر إصدار بطاقة بديلة.');
+    setMessage('تم إصدار بطاقة بديلة. اطبع البطاقة الجديدة من صفحة الطلاب أو البطاقات.');
+    void load();
+  }
 
   const activeCards = useMemo(() => data?.student.cards.filter(card => card.status === 'ACTIVE') ?? [], [data]);
   const revokedCards = useMemo(() => data?.student.cards.filter(card => card.status !== 'ACTIVE') ?? [], [data]);
@@ -86,10 +103,13 @@ export default function StudentDetailsPage() {
           </section>
 
           <h2>البطاقات</h2>
+          <div className="row-actions">
+            <button type="button" onClick={() => void replaceCard()}>إصدار بطاقة بديلة</button>
+          </div>
           <table>
-            <thead><tr><th>رمز البطاقة</th><th>الحالة</th><th>تاريخ الإصدار</th><th>تاريخ الإلغاء</th></tr></thead>
+            <thead><tr><th>رمز البطاقة</th><th>الحالة</th><th>تاريخ الإصدار</th><th>تاريخ الإلغاء</th><th>الإجراء</th></tr></thead>
             <tbody>
-              {[...activeCards, ...revokedCards].map(card => <tr key={card.id}><td className="token">{card.publicToken}</td><td>{card.status}</td><td>{new Date(card.issuedAt).toLocaleString('ar-SA')}</td><td>{card.revokedAt ? new Date(card.revokedAt).toLocaleString('ar-SA') : '—'}</td></tr>)}
+              {[...activeCards, ...revokedCards].map(card => <tr key={card.id}><td className="token">{card.publicToken}</td><td>{card.status}</td><td>{new Date(card.issuedAt).toLocaleString('ar-SA')}</td><td>{card.revokedAt ? new Date(card.revokedAt).toLocaleString('ar-SA') : '—'}</td><td>{card.status === 'ACTIVE' ? <button type="button" className="danger-button" onClick={() => void revokeCard(card.id)}>إلغاء البطاقة</button> : '—'}</td></tr>)}
             </tbody>
           </table>
 
