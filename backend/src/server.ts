@@ -449,6 +449,8 @@ app.get('/api/v1/auth/me', auth, async (req, res, next) => {
 
 const schoolSchema = z.object({ schoolCode: z.string().trim().min(3).max(32), name: z.string().trim().min(3).max(150), city: z.string().trim().min(2).max(80), district: z.string().trim().max(80).optional(), address: z.string().trim().max(300).optional() });
 const schoolUpdateSchema = schoolSchema.extend({ status: z.nativeEnum(EntityStatus).optional() }).partial();
+const schoolManagerSchema = z.object({ email: z.string().trim().email(), password: z.string().min(12).max(128), schoolId: z.string().cuid() });
+const userPasswordResetSchema = z.object({ password: z.string().min(12).max(128) });
 app.get('/api/v1/schools', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN, Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
   try {
     const where = req.claims!.schoolId ? { id: req.claims!.schoolId } : {};
@@ -536,6 +538,143 @@ app.delete('/api/v1/schools/:schoolId', auth, roles(Role.SUPER_ADMIN, Role.ASSOC
       return deleted;
     });
     res.json({ school: updated });
+  } catch (error) { next(error); }
+});
+
+app.get('/api/v1/school-managers', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN), async (_req, res, next) => {
+  try {
+    const managers = await prisma.user.findMany({
+      where: { role: Role.AUDITOR, schoolId: { not: null }, status: EntityStatus.ACTIVE },
+      select: { id: true, email: true, role: true, status: true, createdAt: true, school: { select: { id: true, name: true, schoolCode: true } } },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json({ managers });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/v1/school-managers', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN), async (req, res, next) => {
+  try {
+    const input = schoolManagerSchema.parse(req.body);
+    const school = await prisma.school.findUniqueOrThrow({ where: { id: input.schoolId }, select: { id: true, status: true } });
+    if (school.status !== EntityStatus.ACTIVE) return res.status(409).json({ error: 'SCHOOL_INACTIVE' });
+    const passwordHash = await argon2.hash(input.password);
+    const manager = await prisma.$transaction(async tx => {
+      const created = await tx.user.create({
+        data: { email: input.email.toLowerCase(), passwordHash, role: Role.AUDITOR, schoolId: school.id },
+        select: { id: true, email: true, role: true, status: true, createdAt: true, school: { select: { id: true, name: true, schoolCode: true } } }
+      });
+      await audit(tx, req, { action: 'SCHOOL_MANAGER_CREATED', entity: 'User', entityId: created.id, schoolId: school.id, newValue: cleanJson({ email: created.email, role: created.role, schoolId: school.id }) });
+      return created;
+    });
+    res.status(201).json({ manager });
+  } catch (error) { next(error); }
+});
+
+app.patch('/api/v1/school-managers/:userId/password', auth, roles(Role.SUPER_ADMIN, Role.ASSOCIATION_ADMIN), async (req, res, next) => {
+  try {
+    const input = userPasswordResetSchema.parse(req.body);
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: routeParam(req.params.userId) }, select: { id: true, email: true, role: true, schoolId: true, status: true } });
+    if (user.role !== Role.AUDITOR || !user.schoolId || user.status !== EntityStatus.ACTIVE) return res.status(400).json({ error: 'INVALID_SCHOOL_MANAGER' });
+    const passwordHash = await argon2.hash(input.password);
+    const manager = await prisma.$transaction(async tx => {
+      const updated = await tx.user.update({ where: { id: user.id }, data: { passwordHash }, select: { id: true, email: true, role: true, status: true, createdAt: true, school: { select: { id: true, name: true, schoolCode: true } } } });
+      await tx.loginAttempt.deleteMany({ where: { email: user.email.toLowerCase() } });
+      await audit(tx, req, { action: 'SCHOOL_MANAGER_PASSWORD_RESET', entity: 'User', entityId: user.id, schoolId: user.schoolId, newValue: cleanJson({ email: user.email }) });
+      return updated;
+    });
+    res.json({ manager });
+  } catch (error) { next(error); }
+});
+
+app.get('/api/v1/school-manager/overview', auth, roles(Role.SCHOOL_ADMIN, Role.AUDITOR), async (req, res, next) => {
+  try {
+    if (!req.claims!.schoolId) return res.status(403).json({ error: 'SCHOOL_MANAGER_SCOPE_REQUIRED' });
+    const schoolId = req.claims!.schoolId;
+    const today = startOfToday();
+    const week = daysAgo(6);
+    const month = startOfThisMonth();
+    const settings = await getSystemSettings();
+    const [
+      school,
+      students,
+      walletBalance,
+      todaySpent,
+      weekSpent,
+      monthSpent,
+      activeCards,
+      revokedCards,
+      recentTransactions,
+      lowWallets,
+      dailyDebits,
+      dailyRefunds
+    ] = await Promise.all([
+      prisma.school.findUniqueOrThrow({ where: { id: schoolId }, select: { id: true, name: true, schoolCode: true, city: true, district: true, status: true } }),
+      prisma.student.findMany({ where: { schoolId }, include: { wallet: { select: { balance: true, currency: true } }, cards: { where: { status: CardStatus.ACTIVE }, select: { id: true, issuedAt: true } } }, orderBy: [{ grade: 'asc' }, { fullName: 'asc' }] }),
+      prisma.wallet.aggregate({ where: { student: { schoolId } }, _sum: { balance: true } }),
+      prisma.walletTransaction.aggregate({ where: { schoolId, type: TransactionType.DEBIT, createdAt: { gte: today } }, _sum: { amount: true }, _count: { id: true } }),
+      prisma.walletTransaction.aggregate({ where: { schoolId, type: TransactionType.DEBIT, createdAt: { gte: week } }, _sum: { amount: true }, _count: { id: true } }),
+      prisma.walletTransaction.aggregate({ where: { schoolId, type: TransactionType.DEBIT, createdAt: { gte: month } }, _sum: { amount: true }, _count: { id: true } }),
+      prisma.card.count({ where: { status: CardStatus.ACTIVE, student: { schoolId } } }),
+      prisma.card.count({ where: { status: CardStatus.REVOKED, student: { schoolId } } }),
+      prisma.walletTransaction.findMany({ where: { schoolId, type: { in: [TransactionType.DEBIT, TransactionType.REFUND, TransactionType.CREDIT] } }, include: { canteen: { select: { name: true } } }, orderBy: { createdAt: 'desc' }, take: 25 }),
+      prisma.wallet.findMany({ where: { balance: { lt: settings.lowBalanceThreshold }, student: { schoolId, status: EntityStatus.ACTIVE } }, include: { student: { select: { id: true, fullName: true, studentCode: true } } }, orderBy: { balance: 'asc' }, take: 20 }),
+      prisma.walletTransaction.findMany({ where: { schoolId, type: TransactionType.DEBIT, createdAt: { gte: today } }, select: { studentId: true, amount: true } }),
+      prisma.walletTransaction.findMany({ where: { schoolId, type: TransactionType.REFUND, createdAt: { gte: today } }, select: { studentId: true, amount: true, reference: true } })
+    ]);
+
+    const todayUsage = new Map<string, { debit: number; refund: number }>();
+    for (const debit of dailyDebits) todayUsage.set(debit.studentId, { ...(todayUsage.get(debit.studentId) ?? { debit: 0, refund: 0 }), debit: (todayUsage.get(debit.studentId)?.debit ?? 0) + money(debit.amount) });
+    for (const refund of dailyRefunds.filter(item => item.reference.startsWith('REFUND-'))) todayUsage.set(refund.studentId, { ...(todayUsage.get(refund.studentId) ?? { debit: 0, refund: 0 }), refund: (todayUsage.get(refund.studentId)?.refund ?? 0) + money(refund.amount) });
+    const studentMap = new Map(students.map(student => [student.id, student]));
+    const limitReached = [...todayUsage.entries()]
+      .map(([studentId, totals]) => ({ student: studentMap.get(studentId), spent: Math.max(0, totals.debit - totals.refund) }))
+      .filter(item => item.student && item.spent >= money(item.student.dailyLimit))
+      .map(item => ({ studentId: item.student!.id, fullName: item.student!.fullName, studentCode: item.student!.studentCode, spentToday: asMoney(item.spent), dailyLimit: asMoney(item.student!.dailyLimit) }));
+
+    res.json({
+      school,
+      summary: {
+        students: students.length,
+        activeStudents: students.filter(student => student.status === EntityStatus.ACTIVE).length,
+        walletBalance: asMoney(walletBalance._sum.balance),
+        todaySpent: asMoney(todaySpent._sum.amount),
+        todayTransactions: todaySpent._count.id,
+        weekSpent: asMoney(weekSpent._sum.amount),
+        monthSpent: asMoney(monthSpent._sum.amount),
+        activeCards,
+        revokedCards,
+        lowBalanceCount: lowWallets.length,
+        dailyLimitReachedCount: limitReached.length
+      },
+      alerts: {
+        lowBalances: lowWallets.map(wallet => ({ studentId: wallet.student.id, fullName: wallet.student.fullName, studentCode: wallet.student.studentCode, balance: asMoney(wallet.balance) })),
+        dailyLimitReached: limitReached
+      },
+      students: students.map(student => ({
+        id: student.id,
+        studentCode: student.studentCode,
+        fullName: student.fullName,
+        grade: student.grade,
+        className: student.className,
+        status: student.status,
+        dailyLimit: asMoney(student.dailyLimit),
+        balance: asMoney(student.wallet?.balance),
+        currency: student.wallet?.currency ?? 'SAR',
+        hasActiveCard: student.cards.length > 0
+      })),
+      recentTransactions: recentTransactions.map(transaction => ({
+        id: transaction.id,
+        type: transaction.type,
+        amount: asMoney(transaction.amount),
+        balanceAfter: asMoney(transaction.balanceAfter),
+        createdAt: transaction.createdAt,
+        reference: transaction.reference,
+        studentId: transaction.studentId,
+        studentName: studentMap.get(transaction.studentId)?.fullName ?? '—',
+        studentCode: studentMap.get(transaction.studentId)?.studentCode ?? '—',
+        canteenName: transaction.canteen?.name ?? '—'
+      }))
+    });
   } catch (error) { next(error); }
 });
 
