@@ -15,11 +15,16 @@ type CanteenUser = {
   operatedCanteens: Canteen[];
 };
 
+type ActionKey = 'cashier' | 'owner' | 'canteen' | 'auditor';
+type TableKey = 'canteens' | 'owners' | 'cashiers' | 'auditors';
+
 export default function CanteenUsers() {
   const [schools, setSchools] = useState<School[]>([]);
   const [users, setUsers] = useState<CanteenUser[]>([]);
   const [canteens, setCanteens] = useState<Array<Canteen & { operator: { id: string; email: string } }>>([]);
   const [resetUser, setResetUser] = useState<CanteenUser | null>(null);
+  const [activeAction, setActiveAction] = useState<ActionKey>('cashier');
+  const [activeTable, setActiveTable] = useState<TableKey>('canteens');
   const [message, setMessage] = useState('');
 
   const activeSchools = useMemo(() => schools.filter(school => school.status === 'ACTIVE'), [schools]);
@@ -140,78 +145,157 @@ export default function CanteenUsers() {
     setMessage(`تم تغيير كلمة مرور ${resetUser.email}. يمكنه تسجيل الدخول بكلمة المرور الجديدة الآن.`);
   }
 
+  const actionCards: Array<{ key: ActionKey; title: string; text: string; stat: string }> = [
+    { key: 'cashier', title: 'حساب كاشير', text: 'يرتبط بمدرسة واحدة ويدخل شاشة المحاسبة فقط.', stat: String(cashierUsers.length) },
+    { key: 'owner', title: 'حساب مالك', text: 'لا يرتبط بمدرسة؛ تضيف له المقاصف التابعة له.', stat: String(ownerUsers.length) },
+    { key: 'canteen', title: 'إضافة مقصف', text: 'اربط المقصف بمدرسة، ثم اختر مالكه.', stat: String(canteens.length) },
+    { key: 'auditor', title: 'مشاهد فقط', text: 'للمراجعة والتقارير بدون إضافة أو تعديل.', stat: String(auditorUsers.length) }
+  ];
+
+  const tableTabs: Array<{ key: TableKey; label: string; count: number }> = [
+    { key: 'canteens', label: 'المقاصف', count: canteens.length },
+    { key: 'owners', label: 'ملاك المقاصف', count: ownerUsers.length },
+    { key: 'cashiers', label: 'الكاشير', count: cashierUsers.length },
+    { key: 'auditors', label: 'المشاهدين', count: auditorUsers.length }
+  ];
+
+  const resetLabel = resetUser?.role === 'AUDITOR' ? 'حساب المدقق' : resetUser?.school ? 'حساب الكاشير' : 'مالك المقصف';
+
   return (
     <AdminShell>
       <header>
         <div>
           <h1>ملاك المقاصف</h1>
-          <span>افصل بين حساب الكاشير المرتبط بمدرسة، وحساب المالك الذي تُضاف له المقاصف التابعة</span>
+          <span>إدارة حسابات الكاشير، ملاك المقاصف، وربط كل مقصف بمدرسته ومالكه</span>
         </div>
         <a href="/canteen-owner">واجهة مالك المقصف ←</a>
       </header>
 
-      <section className="dashboard-section">
-        <div className="section-title compact">
-          <h2>إنشاء حساب للمقصف</h2>
-          <span>هذا الحساب خاص بالكاشير، ويرتبط بمدرسة واحدة فقط لاستخدام شاشة المحاسبة</span>
-        </div>
-        <form className="entry" onSubmit={createCashierAccount}>
-          <input name="email" type="email" placeholder="بريد حساب المقصف" autoComplete="off" required />
-          <input name="password" type="password" minLength={12} placeholder="كلمة مرور 12 حرف أو أكثر" autoComplete="new-password" required />
-          <select name="schoolId" required defaultValue="">
-            <option value="" disabled>اختر المدرسة</option>
-            {activeSchools.map(school => <option key={school.id} value={school.id}>{school.name} — {school.schoolCode}</option>)}
-          </select>
-          <button>إنشاء الحساب</button>
-        </form>
+      <section className="dashboard-section canteen-admin-guide">
+        <article>
+          <strong>الترتيب الصحيح</strong>
+          <span>1) أنشئ حساب مالك المقصف عند الحاجة. 2) أضف المقصف واربطه بمدرسة ومالك. 3) أنشئ حساب كاشير للمدرسة التي تتم فيها المحاسبة.</span>
+        </article>
+        <article>
+          <strong>تنبيه مهم</strong>
+          <span>حتى لو كان المالك واحدًا لمدرستين، اجعل لكل مدرسة مقصفًا مستقلًا حتى تبقى التسويات والتقارير صحيحة.</span>
+        </article>
       </section>
 
       <section className="dashboard-section">
-        <div className="section-title compact">
-          <h2>إنشاء حساب مالك مقصف</h2>
-          <span>حساب المالك لا يرتبط بمدرسة مباشرة؛ تضيف له المقاصف فقط</span>
+        <div className="canteen-action-grid">
+          {actionCards.map(action => (
+            <button
+              className={`action-choice ${activeAction === action.key ? 'active' : ''}`}
+              key={action.key}
+              type="button"
+              onClick={() => setActiveAction(action.key)}
+            >
+              <b>{action.stat}</b>
+              <strong>{action.title}</strong>
+              <span>{action.text}</span>
+            </button>
+          ))}
         </div>
-        <form className="entry" onSubmit={createOwnerAccount}>
-          <input name="email" type="email" placeholder="بريد مالك المقصف" autoComplete="off" required />
-          <input name="password" type="password" minLength={12} placeholder="كلمة مرور 12 حرف أو أكثر" autoComplete="new-password" required />
-          <button>إنشاء حساب المالك</button>
-        </form>
-      </section>
 
-      <section className="dashboard-section">
-        <div className="section-title compact">
-          <h2>إضافة مقصف تابع لمالك</h2>
-          <span>اربط المقصف بمدرسته، ثم اختر مالك المقصف المسؤول عنه</span>
-        </div>
-        <form className="entry" onSubmit={createCanteen}>
-          <input name="name" placeholder="اسم المقصف" required />
-          <input name="canteenCode" placeholder="رمز اختياري للمقصف" />
-          <select name="schoolId" required defaultValue="">
-            <option value="" disabled>اختر المدرسة</option>
-            {activeSchools.map(school => <option key={school.id} value={school.id}>{school.name} — {school.schoolCode}</option>)}
-          </select>
-          <select name="operatorId" required defaultValue="">
-            <option value="" disabled>اختر مالك المقصف</option>
-            {ownerUsers.map(user => <option key={user.id} value={user.id}>{user.email}</option>)}
-          </select>
-          <button>إضافة المقصف</button>
-        </form>
-      </section>
+        <div className="panel canteen-action-panel">
+          {activeAction === 'cashier' && (
+            <>
+              <div className="section-title compact">
+                <h2>إنشاء حساب كاشير مقصف</h2>
+                <span>هذا الحساب يدخل شاشة المحاسبة فقط، ويرتبط بمدرسة واحدة.</span>
+              </div>
+              <form className="entry" onSubmit={createCashierAccount}>
+                <label>بريد الكاشير
+                  <input name="email" type="email" placeholder="cashier@taazur.sa" autoComplete="off" required />
+                </label>
+                <label>كلمة المرور
+                  <input name="password" type="password" minLength={12} placeholder="12 حرف أو أكثر" autoComplete="new-password" required />
+                </label>
+                <label>المدرسة
+                  <select name="schoolId" required defaultValue="">
+                    <option value="" disabled>اختر المدرسة</option>
+                    {activeSchools.map(school => <option key={school.id} value={school.id}>{school.name} — {school.schoolCode}</option>)}
+                  </select>
+                </label>
+                <button>إنشاء حساب الكاشير</button>
+              </form>
+            </>
+          )}
 
-      <section className="dashboard-section">
-        <div className="section-title compact">
-          <h2>إنشاء حساب مدقق / مشاهد فقط</h2>
-          <span>هذا الحساب يراجع التقارير والسجلات بدون صلاحية إضافة أو تعديل</span>
+          {activeAction === 'owner' && (
+            <>
+              <div className="section-title compact">
+                <h2>إنشاء حساب مالك مقصف</h2>
+                <span>حساب المالك يشاهد المقاصف التابعة له والمصاريف والتسويات، ولا يدخل شاشة الكاشير.</span>
+              </div>
+              <form className="entry" onSubmit={createOwnerAccount}>
+                <label>بريد مالك المقصف
+                  <input name="email" type="email" placeholder="owner@company.sa" autoComplete="off" required />
+                </label>
+                <label>كلمة المرور
+                  <input name="password" type="password" minLength={12} placeholder="12 حرف أو أكثر" autoComplete="new-password" required />
+                </label>
+                <button>إنشاء حساب المالك</button>
+                <p className="form-note">بعد إنشاء الحساب، انتقل إلى “إضافة مقصف” واربط المقاصف بهذا المالك.</p>
+              </form>
+            </>
+          )}
+
+          {activeAction === 'canteen' && (
+            <>
+              <div className="section-title compact">
+                <h2>إضافة مقصف وربطه بمالك</h2>
+                <span>المقصف يرتبط بمدرسة واحدة، ويمكن للمالك الواحد امتلاك أكثر من مقصف.</span>
+              </div>
+              <form className="entry" onSubmit={createCanteen}>
+                <label>اسم المقصف
+                  <input name="name" placeholder="مثال: مقصف ابتدائية السداد" required />
+                </label>
+                <label>رمز المقصف
+                  <input name="canteenCode" placeholder="اختياري" />
+                </label>
+                <label>المدرسة
+                  <select name="schoolId" required defaultValue="">
+                    <option value="" disabled>اختر المدرسة</option>
+                    {activeSchools.map(school => <option key={school.id} value={school.id}>{school.name} — {school.schoolCode}</option>)}
+                  </select>
+                </label>
+                <label>مالك المقصف
+                  <select name="operatorId" required defaultValue="">
+                    <option value="" disabled>اختر مالك المقصف</option>
+                    {ownerUsers.map(user => <option key={user.id} value={user.id}>{user.email}</option>)}
+                  </select>
+                </label>
+                <button>إضافة المقصف</button>
+              </form>
+            </>
+          )}
+
+          {activeAction === 'auditor' && (
+            <>
+              <div className="section-title compact">
+                <h2>إنشاء حساب مدقق / مشاهد فقط</h2>
+                <span>هذا الحساب يراجع التقارير والسجلات بدون صلاحية إضافة أو تعديل.</span>
+              </div>
+              <form className="entry" onSubmit={createAuditorAccount}>
+                <label>بريد المدقق
+                  <input name="email" type="email" placeholder="auditor@taazur.sa" autoComplete="off" required />
+                </label>
+                <label>كلمة المرور
+                  <input name="password" type="password" minLength={12} placeholder="12 حرف أو أكثر" autoComplete="new-password" required />
+                </label>
+                <label>نطاق المدرسة
+                  <select name="schoolId" defaultValue="">
+                    <option value="">كل المدارس حسب صلاحية المدير</option>
+                    {activeSchools.map(school => <option key={school.id} value={school.id}>{school.name} — {school.schoolCode}</option>)}
+                  </select>
+                </label>
+                <button>إنشاء حساب مدقق</button>
+              </form>
+            </>
+          )}
         </div>
-        <form className="entry" onSubmit={createAuditorAccount}>
-          <input name="email" type="email" placeholder="بريد المدقق" autoComplete="off" required />
-          <input name="password" type="password" minLength={12} placeholder="كلمة مرور 12 حرف أو أكثر" autoComplete="new-password" required />
-          <select name="schoolId" defaultValue="">
-            <option value="">كل المدارس حسب صلاحية المدير</option>
-            {activeSchools.map(school => <option key={school.id} value={school.id}>{school.name} — {school.schoolCode}</option>)}
-          </select>
-          <button>إنشاء حساب مدقق</button>
-        </form>
       </section>
 
       {message && <p role="status">{message}</p>}
@@ -219,7 +303,7 @@ export default function CanteenUsers() {
       {resetUser && (
         <section className="dashboard-section">
           <div className="section-title compact">
-            <h2>تغيير كلمة مرور {resetUser.role === 'AUDITOR' ? 'حساب المدقق' : resetUser.school ? 'حساب المقصف' : 'مالك المقصف'}</h2>
+            <h2>تغيير كلمة مرور {resetLabel}</h2>
             <span>لن تظهر كلمة المرور بعد الحفظ، وسيتم إزالة قفل محاولات الدخول الفاشلة لهذا الحساب</span>
           </div>
           <form className="entry" onSubmit={resetPassword}>
@@ -231,38 +315,59 @@ export default function CanteenUsers() {
         </section>
       )}
 
-      <h2>المقاصف المسجلة</h2>
-      <table>
-        <thead><tr><th>المقصف</th><th>الرمز</th><th>المدرسة</th><th>مالك المقصف</th><th>الحالة</th></tr></thead>
-        <tbody>{canteens.map(canteen => <tr key={canteen.id}><td><a className="table-link" href={`/canteens/${canteen.id}`}>{canteen.name}</a></td><td>{canteen.canteenCode ?? '—'}</td><td>{canteen.school.name}<br /><small>{canteen.school.schoolCode}</small></td><td>{canteen.operator.email}</td><td>{canteen.status}</td></tr>)}</tbody>
-      </table>
+      <section className="dashboard-section">
+        <div className="section-title">
+          <div>
+            <h2>السجلات</h2>
+            <span>اختر الجدول الذي تريد مراجعته بدل عرض كل الجداول مرة واحدة</span>
+          </div>
+        </div>
+        <div className="table-tabs">
+          {tableTabs.map(tab => (
+            <button className={activeTable === tab.key ? 'active' : ''} key={tab.key} type="button" onClick={() => setActiveTable(tab.key)}>
+              {tab.label}
+              <b>{tab.count}</b>
+            </button>
+          ))}
+        </div>
 
-      <h2>حسابات ملاك المقاصف</h2>
-      <table>
-        <thead><tr><th>البريد</th><th>المقاصف التابعة</th><th>تاريخ الإنشاء</th><th>الإجراء</th></tr></thead>
-        <tbody>
-          {ownerUsers.map(user => <tr key={user.id}><td>{user.email}</td><td>{user.operatedCanteens.length ? user.operatedCanteens.map(canteen => `${canteen.name} (${canteen.school.name})`).join('، ') : 'لم تتم إضافة مقاصف بعد'}</td><td>{new Date(user.createdAt).toLocaleString('ar-SA')}</td><td><button type="button" onClick={() => setResetUser(user)}>تغيير كلمة المرور</button></td></tr>)}
-          {!ownerUsers.length && <tr><td colSpan={4}>لا توجد حسابات ملاك مقاصف حتى الآن.</td></tr>}
-        </tbody>
-      </table>
+        {activeTable === 'canteens' && (
+          <table>
+            <thead><tr><th>المقصف</th><th>الرمز</th><th>المدرسة</th><th>مالك المقصف</th><th>الحالة</th></tr></thead>
+            <tbody>{canteens.map(canteen => <tr key={canteen.id}><td><a className="table-link" href={`/canteens/${canteen.id}`}>{canteen.name}</a></td><td>{canteen.canteenCode ?? '—'}</td><td>{canteen.school.name}<br /><small>{canteen.school.schoolCode}</small></td><td>{canteen.operator.email}</td><td>{canteen.status}</td></tr>)}</tbody>
+          </table>
+        )}
 
-      <h2>حسابات المقاصف / الكاشير</h2>
-      <table>
-        <thead><tr><th>البريد</th><th>المدرسة المرتبط بها</th><th>تاريخ الإنشاء</th><th>الإجراء</th></tr></thead>
-        <tbody>
-          {cashierUsers.map(user => <tr key={user.id}><td>{user.email}</td><td>{user.school?.name}<br /><small>{user.school?.schoolCode}</small></td><td>{new Date(user.createdAt).toLocaleString('ar-SA')}</td><td><button type="button" onClick={() => setResetUser(user)}>تغيير كلمة المرور</button></td></tr>)}
-          {!cashierUsers.length && <tr><td colSpan={4}>لا توجد حسابات مقصف/كاشير حتى الآن.</td></tr>}
-        </tbody>
-      </table>
+        {activeTable === 'owners' && (
+          <table>
+            <thead><tr><th>البريد</th><th>المقاصف التابعة</th><th>تاريخ الإنشاء</th><th>الإجراء</th></tr></thead>
+            <tbody>
+              {ownerUsers.map(user => <tr key={user.id}><td>{user.email}</td><td>{user.operatedCanteens.length ? user.operatedCanteens.map(canteen => `${canteen.name} (${canteen.school.name})`).join('، ') : 'لم تتم إضافة مقاصف بعد'}</td><td>{new Date(user.createdAt).toLocaleString('ar-SA')}</td><td><button type="button" onClick={() => setResetUser(user)}>تغيير كلمة المرور</button></td></tr>)}
+              {!ownerUsers.length && <tr><td colSpan={4}>لا توجد حسابات ملاك مقاصف حتى الآن.</td></tr>}
+            </tbody>
+          </table>
+        )}
 
-      <h2>حسابات المدققين / المشاهدين فقط</h2>
-      <table>
-        <thead><tr><th>البريد</th><th>نطاق المدرسة</th><th>تاريخ الإنشاء</th><th>الإجراء</th></tr></thead>
-        <tbody>
-          {auditorUsers.map(user => <tr key={user.id}><td>{user.email}</td><td>{user.school ? <>{user.school.name}<br /><small>{user.school.schoolCode}</small></> : 'كل المدارس'}</td><td>{new Date(user.createdAt).toLocaleString('ar-SA')}</td><td><button type="button" onClick={() => setResetUser(user)}>تغيير كلمة المرور</button></td></tr>)}
-          {!auditorUsers.length && <tr><td colSpan={4}>لا توجد حسابات مدققين حتى الآن.</td></tr>}
-        </tbody>
-      </table>
+        {activeTable === 'cashiers' && (
+          <table>
+            <thead><tr><th>البريد</th><th>المدرسة المرتبط بها</th><th>تاريخ الإنشاء</th><th>الإجراء</th></tr></thead>
+            <tbody>
+              {cashierUsers.map(user => <tr key={user.id}><td>{user.email}</td><td>{user.school?.name}<br /><small>{user.school?.schoolCode}</small></td><td>{new Date(user.createdAt).toLocaleString('ar-SA')}</td><td><button type="button" onClick={() => setResetUser(user)}>تغيير كلمة المرور</button></td></tr>)}
+              {!cashierUsers.length && <tr><td colSpan={4}>لا توجد حسابات مقصف/كاشير حتى الآن.</td></tr>}
+            </tbody>
+          </table>
+        )}
+
+        {activeTable === 'auditors' && (
+          <table>
+            <thead><tr><th>البريد</th><th>نطاق المدرسة</th><th>تاريخ الإنشاء</th><th>الإجراء</th></tr></thead>
+            <tbody>
+              {auditorUsers.map(user => <tr key={user.id}><td>{user.email}</td><td>{user.school ? <>{user.school.name}<br /><small>{user.school.schoolCode}</small></> : 'كل المدارس'}</td><td>{new Date(user.createdAt).toLocaleString('ar-SA')}</td><td><button type="button" onClick={() => setResetUser(user)}>تغيير كلمة المرور</button></td></tr>)}
+              {!auditorUsers.length && <tr><td colSpan={4}>لا توجد حسابات مدققين حتى الآن.</td></tr>}
+            </tbody>
+          </table>
+        )}
+      </section>
     </AdminShell>
   );
 }
